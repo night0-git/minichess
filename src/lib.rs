@@ -1,5 +1,4 @@
-mod chess;
-mod game;
-mod move_gen;
-mod position;
-mod search;
+pub mod chess;
+pub mod move_gen;
+pub mod position;
+pub mod search;

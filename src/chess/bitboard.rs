@@ -12,6 +12,8 @@
          a  b  c  d  e  f  g  h
 */
 
+use super::square::Square;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     North = 8,
@@ -33,7 +35,7 @@ impl Direction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Bitboard(pub u64);
+pub struct Bitboard(u64);
 
 impl Bitboard {
     pub const EMPTY: Self = Self(0u64);
@@ -50,8 +52,12 @@ impl Bitboard {
 }
 
 impl Bitboard {
-    pub const fn new(raw: u64) -> Self {
-        Self(raw)
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn as_u64(self) -> u64 {
+        self.0
     }
 
     pub const fn is_empty(self) -> bool {
@@ -66,36 +72,36 @@ impl Bitboard {
         self.0.count_ones()
     }
 
-    pub const fn contains(self, square: u8) -> bool {
-        (self.0 & (1 << square)) != 0
+    pub const fn contains(self, sq: Square) -> bool {
+        (self.0 & sq.mask()) != 0
     }
 
-    pub const fn with_bit(self, square: u8) -> Self {
-        Self(self.0 | (1 << square))
+    pub const fn with_bit(self, sq: Square) -> Self {
+        Self(self.0 | sq.mask())
     }
 
-    pub const fn without_bit(self, square: u8) -> Self {
-        Self(self.0 & !(1 << square))
+    pub const fn without_bit(self, sq: Square) -> Self {
+        Self(self.0 & !sq.mask())
     }
 
-    pub const fn toggled_bit(self, square: u8) -> Self {
-        Self(self.0 ^ (1 << square))
+    pub const fn toggled_bit(self, sq: Square) -> Self {
+        Self(self.0 ^ sq.mask())
     }
 
     pub const fn cleared_ls1b(self) -> Self {
         Self(self.0 & self.0.wrapping_sub(1))
     }
     
-    pub fn set_bit(&mut self, square: u8) {
-        self.0 |= 1 << square;
+    pub fn set_bit(&mut self, sq: Square) {
+        self.0 |= sq.mask();
     }
 
-    pub fn remove_bit(&mut self, square: u8) {
-        self.0 &= !(1 << square);
+    pub fn clear_bit(&mut self, sq: Square) {
+        self.0 &= !sq.mask();
     }
 
-    pub fn toggle_bit(&mut self, square: u8) {
-        self.0 ^= (1 << square);
+    pub fn toggle_bit(&mut self, sq: Square) {
+        self.0 ^= sq.mask();
     }
 
     pub fn pop_ls1b(&mut self) -> u8 {
@@ -189,13 +195,13 @@ impl std::ops::BitAndAssign for Bitboard {
 impl std::ops::BitOrAssign for Bitboard {
     #[inline(always)]
     fn bitor_assign(&mut self, rhs: Self) {
-        self.0 |= rhs;
+        self.0 |= rhs.0;
     }
 }
 impl std::ops::BitXorAssign for Bitboard {
     #[inline(always)]
     fn bitxor_assign(&mut self, rhs: Self) {
-        self.0 ^= rhs;
+        self.0 ^= rhs.0;
     }
 }
 
@@ -223,8 +229,8 @@ impl std::fmt::Display for Bitboard {
         for rank in (0..8).rev() {
             write!(f, "{} | ", rank + 1)?;
             for file in 0..8 {
-                let square = rank * 8 + file;
-                if self.contains(square) {
+                let sq = Square::from_coords(rank, file);
+                if self.contains(sq) {
                     write!(f, "X ")?; // Bit is set
                 } else {
                     write!(f, ". ")?; // Bit is empty
@@ -236,6 +242,3 @@ impl std::fmt::Display for Bitboard {
         writeln!(f, "    a b c d e f g h")
     }
 }
-
-
-
