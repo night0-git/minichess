@@ -1,2 +1,2 @@
-mod generator;
-mod attacks;
+pub mod generator;
+pub mod attacks;

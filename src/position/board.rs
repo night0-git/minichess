@@ -29,13 +29,21 @@ pub struct State {
     pub zobrist_key: u64,
 }
 
+impl State {
+    pub const CASTLE_WK: u8 = 0b0001;
+    pub const CASTLE_WQ: u8 = 0b0010;
+    pub const CASTLE_BK: u8 = 0b0100;
+    pub const CASTLE_BQ: u8 = 0b1000;
+}
+
+/// Representation for a chess board/position
 #[derive(Debug, Clone)]
 pub struct Board {
-    pub bboards: [Bitboard; 12],
-    pub pieces: [Option<Piece>; 64],
+    pub(crate) bboards: [Bitboard; 12],
+    pub(crate) pieces: [Option<Piece>; 64],
 
-    pub color_masks: [Bitboard; 2], 
-    pub all_occupancy: Bitboard,
+    pub(crate) color_masks: [Bitboard; 2], 
+    pub(crate) all_occupancy: Bitboard,
 
     pub side_to_move: Color,
     pub fullmove_counter: u32,
@@ -100,7 +108,7 @@ impl Board {
         key
     }
 
-    /// Retrieve any piece at the given square by checking all 12 bitboards.
+    /// Retrieve any piece at the given square by checking the pieces mailbox.
     #[inline(always)]
     pub fn piece_at(&self, sq: Square) -> Option<Piece> {
         self.pieces[sq.as_usize()]
@@ -112,6 +120,42 @@ impl Board {
         self.pieces[sq.as_usize()].filter(|p| p.color() == color)
     }
 
+    /// Get the bitboard/occupancy of a piece
+    #[inline(always)]
+    pub fn bitboard(&self, piece: Piece) -> Bitboard {
+        self.bboards[piece as usize]
+    }
+
+    #[inline(always)]
+    pub fn occupancy(&self) -> Bitboard {
+        self.all_occupancy
+    }
+    
+    /// Get the bitboard/occupancy of a color
+    #[inline(always)]
+    pub fn us(&self, color: Color) -> Bitboard {
+        self.color_masks[color as usize]
+    }
+
+    #[inline(always)]
+    pub fn can_castle_kingside(&self, us: Color) -> bool {
+        if us == Color::White {
+            (self.state.castling_rights & State::CASTLE_WK) != 0
+        } else {
+            (self.state.castling_rights & State::CASTLE_BK) != 0
+        }
+    }
+
+    #[inline(always)]
+    pub fn can_castle_queenside(&self, us: Color) -> bool {
+        if us == Color::White {
+            (self.state.castling_rights & State::CASTLE_WQ) != 0
+        } else {
+            (self.state.castling_rights & State::CASTLE_BQ) != 0
+        }
+    }
+
+    #[allow(clippy::collapsible_if)]
     pub fn make_move(&mut self, mv: Move) {
         self.history.push(self.state);
 

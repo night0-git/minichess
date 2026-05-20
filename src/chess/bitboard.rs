@@ -42,6 +42,8 @@ impl Bitboard {
     pub const ALL: Self = Self(1u64);
 
     pub const FILE_A: u64     = 0x0101010101010101;
+    pub const FILE_B: u64     = 0x0202020202020202;
+    pub const FILE_G: u64     = 0x4040404040404040;
     pub const FILE_H: u64     = 0x8080808080808080;
     pub const RANK_1: u64     = 0x00000000000000FF;
     pub const RANK_8: u64     = 0xFF00000000000000;
@@ -61,11 +63,11 @@ impl Bitboard {
     }
 
     pub const fn is_empty(self) -> bool {
-        self.0.count_ones() == 0
+        self.0 == 0
     }
 
     pub const fn is_any(self) -> bool {
-        self.0.count_ones() != 0
+        self.0 != 0
     }
 
     pub const fn count(self) -> u32 {
@@ -76,19 +78,19 @@ impl Bitboard {
         (self.0 & sq.mask()) != 0
     }
 
-    pub const fn with_bit(self, sq: Square) -> Self {
+    pub const fn with_sq(self, sq: Square) -> Self {
         Self(self.0 | sq.mask())
     }
 
-    pub const fn without_bit(self, sq: Square) -> Self {
+    pub const fn without_sq(self, sq: Square) -> Self {
         Self(self.0 & !sq.mask())
     }
 
-    pub const fn toggled_bit(self, sq: Square) -> Self {
+    pub const fn toggled_sq(self, sq: Square) -> Self {
         Self(self.0 ^ sq.mask())
     }
 
-    pub const fn cleared_ls1b(self) -> Self {
+    pub const fn cleared_lsb(self) -> Self {
         Self(self.0 & self.0.wrapping_sub(1))
     }
     
@@ -104,37 +106,42 @@ impl Bitboard {
         self.0 ^= sq.mask();
     }
 
-    pub fn pop_ls1b(&mut self) -> u8 {
-        let ls1b = self.0.trailing_zeros();
-        self.0 &= !(1 << ls1b);
-        ls1b as u8
+    pub fn pop_lsb(&mut self) -> Square {
+        let sq = self.lsb();
+        self.0 &= self.0.wrapping_sub(1);
+        sq
     }
 
-    pub const fn ls1b(self) -> u8 {
-        self.0.trailing_zeros() as u8
+    pub const fn lsb(self) -> Square {
+        Square::new(self.0.trailing_zeros() as u8)
     }
 
-    pub const fn ms1b(self) -> u8 {
-        63 - self.0.leading_zeros() as u8
+    pub const fn msb(self) -> Square {
+        Square::new(63 - self.0.leading_zeros() as u8)
     }
 
     pub const fn shift(self, direction: Direction) -> Self {
-        let d = direction as i8;
-        if d > 0 {
-            Self(self.0 << d as u32)
-        } else {
-            Self(self.0 >> (d.abs() as u32))
+        match direction {
+            Direction::North => Self(self.0 << 8),
+            Direction::South => Self(self.0 >> 8),
+            
+            // Mask out the H-file before shifting east
+            Direction::East => Self((self.0 & !Self::FILE_H) << 1),
+            Direction::NorthEast => Self((self.0 & !Self::FILE_H) << 9),
+            Direction::SouthEast => Self((self.0 & !Self::FILE_H) >> 7),
+            
+            // Mask out the A-file before shifting west
+            Direction::West => Self((self.0 & !Self::FILE_A) >> 1),
+            Direction::NorthWest => Self((self.0 & !Self::FILE_A) << 7),
+            Direction::SouthWest => Self((self.0 & !Self::FILE_A) >> 9),
         }
     }
 
     pub const fn rotate_180(self) -> Self {
-        // Use rust built-in method instead of doing
-        // manual delta swaps
         Self(self.0.reverse_bits())
     }
 
     pub const fn mirror_vertical(self) -> Self {
-        // Rust also has a built-in method for this
         Self(self.0.swap_bytes())
     }
 
@@ -206,19 +213,13 @@ impl std::ops::BitXorAssign for Bitboard {
 }
 
 impl Iterator for Bitboard {
-    type Item = u8;
+    type Item = Square;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.0 == 0 {
             None
         } else {
-            // Find ls1b
-            let index = self.0.trailing_zeros() as u8;
-            
-            // Clear the ls1b
-            self.0 &= self.0.wrapping_sub(1);
-            
-            Some(index)
+            Some(self.pop_lsb())
         }
     }
 }
