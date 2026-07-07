@@ -11,7 +11,7 @@ fn main() {
     println!("{}", board);
 
 
-    let mut moves = generator::gen_moves(&board);
+    let mut moves = generator::gen_all_moves(&board);
     for m in moves {
         print!("{} ", m);
     }
