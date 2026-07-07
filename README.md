@@ -1,1 +1,1 @@
-*currently in progress*
+A modern chess engine built for integration in my pppChess app.
