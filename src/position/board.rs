@@ -3,6 +3,21 @@ use super::zobrist::ZOBRIST;
 use crate::chess::r#move::Flag;
 use crate::chess::piece::{Color, Kind};
 use crate::chess::{Bitboard, Move, Piece, Square};
+use thiserror::Error;
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum Error {
+    #[error("no piece belonging to side to move at source square {0}")]
+    NoPieceAtSource(Square),
+    #[error("illegal move: {0}")]
+    IllegalMove(Move),
+    #[error("no state history to unmake")]
+    EmptyHistory,
+    #[error("no piece at destination square {0} during unmake")]
+    NoPieceAtDestination(Square),
+    #[error(transparent)]
+    Fen(#[from] fen::ParseError),
+}
 
 /// Array used to update castling rights upon moves and captures.
 /// Index by square (0..64).
@@ -20,7 +35,7 @@ pub const CASTLING_MASKS: [u8; 64] = [
 
 /// Stores irreversible board data, such data that cannot
 /// have its previous state be mathematically deduced.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct State {
     pub castling_rights: u8,
     pub ep_square: Option<Square>,
@@ -38,7 +53,7 @@ impl State {
 }
 
 /// Representation for a chess board/position
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Board {
     pub(crate) bboards: [Bitboard; 12],
     pub(crate) pieces: [Option<Piece>; 64],
@@ -54,7 +69,7 @@ pub struct Board {
 }
 
 impl Board {
-    pub fn from_fen(fen: &str) -> Result<Self, &'static str> {
+    pub fn from_fen(fen: &str) -> Result<Self, fen::ParseError> {
         fen::parse(fen)
     }
 
@@ -357,6 +372,33 @@ impl Board {
         self.state = self.history.pop().expect("No state history to unmake");
     }
 
+    /// Attempt to make a move, verifying that there is a piece belonging to the side to move
+    /// at the source square. Returns an error instead of panicking if invalid.
+    pub fn try_make_move(&mut self, mv: Move) -> Result<(), Error> {
+        let us = self.side_to_move;
+        let from = mv.from();
+        if self.piece_at_color(from, us).is_none() {
+            return Err(Error::NoPieceAtSource(from));
+        }
+        self.make_move(mv);
+        Ok(())
+    }
+
+    /// Attempt to unmake a move, verifying that history is non-empty and that there is a piece
+    /// at the destination square. Returns an error instead of panicking if invalid.
+    pub fn try_unmake_move(&mut self, mv: Move) -> Result<(), Error> {
+        if self.history.is_empty() {
+            return Err(Error::EmptyHistory);
+        }
+        let us = self.side_to_move.flip();
+        let to = mv.to();
+        if self.piece_at_color(to, us).is_none() {
+            return Err(Error::NoPieceAtDestination(to));
+        }
+        self.unmake_move(mv);
+        Ok(())
+    }
+
     #[inline(always)]
     fn put_piece(&mut self, piece: Piece, sq: Square) {
         // Set bit and update masks
@@ -551,5 +593,37 @@ mod tests {
         board.unmake_move(ep_mv);
         assert_eq!(board.to_fen(), fen_before_ep);
         assert_eq!(board.state.zobrist_key, key_before_ep);
+    }
+
+    #[test]
+    fn test_try_make_unmake_move_errors() {
+        let mut board = Board::default();
+
+        // White moves first, e7 has a black pawn, not white
+        let invalid_white_mv = Move::from_str("e7e5").unwrap();
+        assert_eq!(
+            board.try_make_move(invalid_white_mv),
+            Err(Error::NoPieceAtSource(Square::from_str("e7").unwrap()))
+        );
+
+        // Cannot unmake when history is empty
+        assert_eq!(
+            board.try_unmake_move(Move::from_str("e2e4").unwrap()),
+            Err(Error::EmptyHistory)
+        );
+
+        // Make a valid move
+        let valid_mv = Move::from_str("e2e4").unwrap();
+        assert!(board.try_make_move(valid_mv).is_ok());
+
+        // Now try unmake with mismatched move (no white piece on a8)
+        let wrong_unmake = Move::from_str("a7a8").unwrap();
+        assert_eq!(
+            board.try_unmake_move(wrong_unmake),
+            Err(Error::NoPieceAtDestination(Square::from_str("a8").unwrap()))
+        );
+
+        // Correct unmake works
+        assert!(board.try_unmake_move(valid_mv).is_ok());
     }
 }

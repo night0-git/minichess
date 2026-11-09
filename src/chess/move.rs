@@ -1,4 +1,17 @@
-use super::square::Square;
+use super::square::{self, Square};
+use thiserror::Error;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum ParseError {
+    #[error("invalid algebraic move length: expected at least 4 characters, found {0}")]
+    InvalidLength(usize),
+    #[error("invalid square in move: {0}")]
+    Square(#[from] square::ParseError),
+    #[error("invalid promotion piece: '{0}' (expected 'q', 'r', 'b', or 'n')")]
+    InvalidPromotion(char),
+}
+
+pub type Error = ParseError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Move(u32);
@@ -26,14 +39,22 @@ impl Move {
 }
 
 impl std::str::FromStr for Move {
-    type Err = &'static str;
+    type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.len() < 4 {
-            return Err("Invalid algebraic move notation length");
+            return Err(ParseError::InvalidLength(s.len()));
         }
         let from = Square::from_str(&s[0..2])?;
         let to = Square::from_str(&s[2..4])?;
+
+        if s.len() >= 5 {
+            let promo_char = s.as_bytes()[4] as char;
+            match promo_char.to_ascii_lowercase() {
+                'q' | 'r' | 'b' | 'n' => {}
+                _ => return Err(ParseError::InvalidPromotion(promo_char)),
+            }
+        }
 
         Ok(Self::new(from, to))
     }
@@ -83,7 +104,17 @@ mod tests {
 
     #[test]
     fn test_move_from_str_invalid() {
-        assert!(Move::from_str("e2").is_err());
-        assert!(Move::from_str("z9z9").is_err());
+        assert_eq!(Move::from_str("e2"), Err(ParseError::InvalidLength(2)));
+        assert_eq!(
+            Move::from_str("z9e4"),
+            Err(ParseError::Square(square::ParseError::InvalidCoordinates {
+                file: 'z',
+                rank: '9'
+            }))
+        );
+        assert_eq!(
+            Move::from_str("e7e8x"),
+            Err(ParseError::InvalidPromotion('x'))
+        );
     }
 }
