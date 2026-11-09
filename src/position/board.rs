@@ -487,34 +487,41 @@ impl Board {
         }
         self.side_to_move = self.side_to_move.flip();
     }
+
+    /// Returns a pretty-formatted ASCII representation of the board.
+    pub fn pretty(&self) -> String {
+        use std::fmt::Write;
+        let mut s = String::new();
+        writeln!(&mut s, "  +-----------------+").unwrap();
+        for rank in (0..8).rev() {
+            write!(&mut s, "{} | ", rank + 1).unwrap();
+            for file in 0..8 {
+                let sq = Square::from_coords(rank, file);
+                if let Some(piece) = self.piece_at(sq) {
+                    write!(&mut s, "{} ", piece.to_char()).unwrap();
+                } else {
+                    write!(&mut s, ". ").unwrap();
+                }
+            }
+            writeln!(&mut s, "|").unwrap();
+        }
+        writeln!(&mut s, "  +-----------------+").unwrap();
+        writeln!(&mut s, "    a b c d e f g h").unwrap();
+
+        writeln!(&mut s, "FEN: {}", self.to_fen()).unwrap();
+        writeln!(&mut s, "Key: {:016X}", self.state.zobrist_key).unwrap();
+        s
+    }
+
+    /// Prints the pretty-formatted ASCII representation of the board to standard output.
+    pub fn pretty_print(&self) {
+        print!("{}", self.pretty());
+    }
 }
 
 impl Default for Board {
     fn default() -> Self {
         Self::from_fen(fen::STARTING_FEN).expect("STARTING_FEN is invalid")
-    }
-}
-
-impl std::fmt::Display for Board {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "  +-----------------+")?;
-        for rank in (0..8).rev() {
-            write!(f, "{} | ", rank + 1)?;
-            for file in 0..8 {
-                let sq = Square::from_coords(rank, file);
-                if let Some(piece) = self.piece_at(sq) {
-                    write!(f, "{} ", piece.to_char())?;
-                } else {
-                    write!(f, ". ")?;
-                }
-            }
-            writeln!(f, "|")?;
-        }
-        writeln!(f, "  +-----------------+")?;
-        writeln!(f, "    a b c d e f g h")?;
-
-        writeln!(f, "FEN: {}", self.to_fen())?;
-        writeln!(f, "Key: {:016X}", self.state.zobrist_key)
     }
 }
 
