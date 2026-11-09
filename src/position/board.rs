@@ -524,7 +524,7 @@ mod tests {
     use std::str::FromStr;
 
     #[test]
-    fn test_make_unmake_pawn_push() {
+    fn makes_and_unmakes_double_pawn_push() {
         let mut board = Board::default();
         let initial_fen = board.to_fen();
         let initial_key = board.state.zobrist_key;
@@ -540,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn test_make_unmake_capture() {
+    fn makes_and_unmakes_regular_capture() {
         // e4, d5, exd5
         let mut board = Board::default();
         board.make_move(Move::from_str("e2e4").unwrap());
@@ -558,7 +558,7 @@ mod tests {
     }
 
     #[test]
-    fn test_make_unmake_castling() {
+    fn makes_and_unmakes_castling() {
         // 1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O
         let mut board = Board::default();
         for m in &["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5"] {
@@ -577,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    fn test_make_unmake_ep_capture() {
+    fn makes_and_unmakes_en_passant_capture() {
         // 1. e4 a6 2. e5 d5 3. exd6
         let mut board = Board::default();
         for m in &["e2e4", "a7a6", "e4e5", "d7d5"] {
@@ -596,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    fn test_try_make_unmake_move_errors() {
+    fn try_make_and_unmake_report_errors() {
         let mut board = Board::default();
 
         // White moves first, e7 has a black pawn, not white

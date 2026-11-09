@@ -95,7 +95,7 @@ mod tests {
     use std::str::FromStr;
 
     #[test]
-    fn test_move_from_str() {
+    fn parses_valid_uci_move() {
         let mv = Move::from_str("e2e4").unwrap();
         assert_eq!(mv.from(), Square::from_str("e2").unwrap());
         assert_eq!(mv.to(), Square::from_str("e4").unwrap());
@@ -103,7 +103,7 @@ mod tests {
     }
 
     #[test]
-    fn test_move_from_str_invalid() {
+    fn rejects_invalid_uci_notation() {
         assert_eq!(Move::from_str("e2"), Err(ParseError::InvalidLength(2)));
         assert_eq!(
             Move::from_str("z9e4"),

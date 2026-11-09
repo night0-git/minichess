@@ -194,13 +194,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_valid_fen() {
+    fn parses_and_regenerates_starting_fen() {
         let board = parse(STARTING_FEN).unwrap();
         assert_eq!(board.to_fen(), STARTING_FEN);
     }
 
     #[test]
-    fn test_parse_fen_errors() {
+    fn rejects_malformed_fen_records() {
         assert_eq!(parse(""), Err(ParseError::MissingField("piece placement")));
         assert_eq!(
             parse("8/8/8/8/8/8/8/8"),

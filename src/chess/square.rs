@@ -136,14 +136,14 @@ mod tests {
     use std::str::FromStr;
 
     #[test]
-    fn test_square_from_str() {
+    fn parses_valid_algebraic_square() {
         assert_eq!(Square::from_str("a1"), Ok(Square::new(0)));
         assert_eq!(Square::from_str("h8"), Ok(Square::new(63)));
         assert_eq!(Square::from_str("e4"), Ok(Square::new(28)));
     }
 
     #[test]
-    fn test_square_from_str_errors() {
+    fn rejects_invalid_algebraic_notation() {
         assert_eq!(Square::from_str("e"), Err(ParseError::InvalidLength(1)));
         assert_eq!(Square::from_str("e44"), Err(ParseError::InvalidLength(3)));
         assert_eq!(
@@ -156,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn test_square_try_from() {
+    fn converts_u8_index_and_rejects_out_of_bounds() {
         assert_eq!(Square::try_from(0), Ok(Square::new(0)));
         assert_eq!(Square::try_from(63), Ok(Square::new(63)));
         assert_eq!(Square::try_from(64), Err(ParseError::IndexOutOfBounds(64)));
