@@ -3,15 +3,9 @@ use super::square::Square;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Move(u32);
 
-impl std::fmt::Display for Move {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "({}, {})", self.from(), self.to())
-    }
-}
-
 impl Move {
-    pub const fn new(from: Square, to: Square, flag: Flag) -> Self {
-        Self(((flag as u32) << 12) | (to.as_u32() << 6) | from.as_u32())
+    pub const fn new(from: Square, to: Square) -> Self {
+        Self((to.as_u32() << 6) | from.as_u32())
     }
 
     pub const fn from(self) -> Square {
@@ -22,16 +16,32 @@ impl Move {
         Square::new(((self.0 >> 6) & 0x3F) as u8)
     }
 
-    pub const fn flag(self) -> Flag {
-        unsafe { std::mem::transmute(((self.0 >> 12) & 0x0F) as u8) }
-    }
-
     pub fn set_score(&mut self, score: u16) {
         self.0 = (self.0 & 0xFFFF) | ((score as u32) << 16);
     }
 
     pub const fn score(self) -> u16 {
         (self.0 >> 16) as u16
+    }
+}
+
+impl std::str::FromStr for Move {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() < 4 {
+            return Err("Invalid algebraic move notation length");
+        }
+        let from = Square::from_str(&s[0..2])?;
+        let to = Square::from_str(&s[2..4])?;
+
+        Ok(Self::new(from, to))
+    }
+}
+
+impl std::fmt::Display for Move {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.from(), self.to())
     }
 }
 
@@ -56,4 +66,24 @@ pub enum Flag {
     BishopPromoCapture = 13,
     RookPromoCapture = 14,
     QueenPromoCapture = 15,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_move_from_str() {
+        let mv = Move::from_str("e2e4").unwrap();
+        assert_eq!(mv.from(), Square::from_str("e2").unwrap());
+        assert_eq!(mv.to(), Square::from_str("e4").unwrap());
+        assert_eq!(mv.to_string(), "e2e4");
+    }
+
+    #[test]
+    fn test_move_from_str_invalid() {
+        assert!(Move::from_str("e2").is_err());
+        assert!(Move::from_str("z9z9").is_err());
+    }
 }

@@ -27,6 +27,7 @@ pub struct State {
     pub halfmove_clock: u32,
     pub captured_pcs: Option<Piece>,
     pub zobrist_key: u64,
+    pub flag: Flag,
 }
 
 impl State {
@@ -76,6 +77,7 @@ impl Board {
                 halfmove_clock: 0,
                 captured_pcs: None,
                 zobrist_key: 0,
+                flag: Flag::Quiet,
             },
             history: Vec::with_capacity(256),
         }
@@ -155,6 +157,59 @@ impl Board {
         }
     }
 
+    pub fn move_flag(&self, mv: Move) -> Flag {
+        let from = mv.from();
+        let to = mv.to();
+        let us = self.side_to_move;
+        let them = us.flip();
+
+        let moving_pcs = self.piece_at_color(from, us)
+            .expect("Invalid move: no piece at source square");
+        let is_capture = self.piece_at_color(to, them).is_some();
+
+        match moving_pcs.kind() {
+            Kind::Pawn => {
+                let promo_rank = match us {
+                    Color::White => 7,
+                    Color::Black => 0,
+                };
+                if to.rank() == promo_rank {
+                    if is_capture {
+                        Flag::QueenPromoCapture
+                    } else {
+                        Flag::QueenPromo
+                    }
+                } else if self.state.ep_square == Some(to) && from.file() != to.file() {
+                    Flag::EpCapture
+                } else if (from.rank() as i8 - to.rank() as i8).abs() == 2 {
+                    Flag::DoublePawnPush
+                } else if is_capture {
+                    Flag::Capture
+                } else {
+                    Flag::Quiet
+                }
+            }
+            Kind::King => {
+                if (from.rank() == 0 || from.rank() == 7) && from.file() == 4 && to.file() == 6 {
+                    Flag::KingCastle
+                } else if (from.rank() == 0 || from.rank() == 7) && from.file() == 4 && to.file() == 2 {
+                    Flag::QueenCastle
+                } else if is_capture {
+                    Flag::Capture
+                } else {
+                    Flag::Quiet
+                }
+            }
+            _ => {
+                if is_capture {
+                    Flag::Capture
+                } else {
+                    Flag::Quiet
+                }
+            }
+        }
+    }
+
     #[allow(clippy::collapsible_if)]
     pub fn make_move(&mut self, mv: Move) {
         self.history.push(self.state);
@@ -164,7 +219,7 @@ impl Board {
 
         let from = mv.from();
         let to = mv.to();
-        let flag = mv.flag();
+        let flag = self.move_flag(mv);
 
         let moving_pcs = self.piece_at_color(from, us)
             .expect("Invalid move: no piece at source square");
@@ -228,7 +283,7 @@ impl Board {
             }
         }
 
-        self.update_state(mv, moving_pcs, captured_pcs);
+        self.update_state(mv, flag, moving_pcs, captured_pcs);
     }
 
     pub fn unmake_move(&mut self, mv: Move) {
@@ -241,7 +296,7 @@ impl Board {
 
         let from = mv.from();
         let to = mv.to();
-        let flag = mv.flag();
+        let flag = self.state.flag;
 
         // Identify and remove the moving piece from destination
         let moving_pcs = self.piece_at_color(to, us)
@@ -334,8 +389,9 @@ impl Board {
     }
 
     #[inline]
-    fn update_state(&mut self, mv: Move, moving_pcs: Piece, captured_pcs: Option<Piece>) {
+    fn update_state(&mut self, mv: Move, flag: Flag, moving_pcs: Piece, captured_pcs: Option<Piece>) {
         self.state.captured_pcs = captured_pcs;
+        self.state.flag = flag;
 
         // Update zobrist key: XOR out old state
         self.state.zobrist_key ^= ZOBRIST.castling[self.state.castling_rights as usize];
@@ -344,7 +400,7 @@ impl Board {
         }
 
         // Update en passant target square
-        if mv.flag() == Flag::DoublePawnPush {
+        if flag == Flag::DoublePawnPush {
             self.state.ep_square = Some(Square::new(match moving_pcs.color() {
                 Color::White => mv.to().as_u8() - 8,
                 Color::Black => mv.to().as_u8() + 8,
@@ -406,5 +462,83 @@ impl std::fmt::Display for Board {
         
         writeln!(f, "FEN: {}", self.to_fen())?;
         writeln!(f, "Key: {:016X}", self.state.zobrist_key)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_make_unmake_pawn_push() {
+        let mut board = Board::default();
+        let initial_fen = board.to_fen();
+        let initial_key = board.state.zobrist_key;
+
+        let mv = Move::from_str("e2e4").unwrap();
+        board.make_move(mv);
+        assert_eq!(board.state.flag, Flag::DoublePawnPush);
+        assert_eq!(board.state.ep_square, Some(Square::from_str("e3").unwrap()));
+
+        board.unmake_move(mv);
+        assert_eq!(board.to_fen(), initial_fen);
+        assert_eq!(board.state.zobrist_key, initial_key);
+    }
+
+    #[test]
+    fn test_make_unmake_capture() {
+        // e4, d5, exd5
+        let mut board = Board::default();
+        board.make_move(Move::from_str("e2e4").unwrap());
+        board.make_move(Move::from_str("d7d5").unwrap());
+        let fen_before_cap = board.to_fen();
+        let key_before_cap = board.state.zobrist_key;
+
+        let cap_mv = Move::from_str("e4d5").unwrap();
+        board.make_move(cap_mv);
+        assert_eq!(board.state.flag, Flag::Capture);
+
+        board.unmake_move(cap_mv);
+        assert_eq!(board.to_fen(), fen_before_cap);
+        assert_eq!(board.state.zobrist_key, key_before_cap);
+    }
+
+    #[test]
+    fn test_make_unmake_castling() {
+        // 1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O
+        let mut board = Board::default();
+        for m in &["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5"] {
+            board.make_move(Move::from_str(m).unwrap());
+        }
+        let fen_before_castle = board.to_fen();
+        let key_before_castle = board.state.zobrist_key;
+
+        let castle_mv = Move::from_str("e1g1").unwrap();
+        board.make_move(castle_mv);
+        assert_eq!(board.state.flag, Flag::KingCastle);
+
+        board.unmake_move(castle_mv);
+        assert_eq!(board.to_fen(), fen_before_castle);
+        assert_eq!(board.state.zobrist_key, key_before_castle);
+    }
+
+    #[test]
+    fn test_make_unmake_ep_capture() {
+        // 1. e4 a6 2. e5 d5 3. exd6
+        let mut board = Board::default();
+        for m in &["e2e4", "a7a6", "e4e5", "d7d5"] {
+            board.make_move(Move::from_str(m).unwrap());
+        }
+        let fen_before_ep = board.to_fen();
+        let key_before_ep = board.state.zobrist_key;
+
+        let ep_mv = Move::from_str("e5d6").unwrap();
+        board.make_move(ep_mv);
+        assert_eq!(board.state.flag, Flag::EpCapture);
+
+        board.unmake_move(ep_mv);
+        assert_eq!(board.to_fen(), fen_before_ep);
+        assert_eq!(board.state.zobrist_key, key_before_ep);
     }
 }

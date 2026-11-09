@@ -1,6 +1,5 @@
 use crate::chess::{Bitboard, Move, Piece, Square};
 use crate::chess::piece::{Color, Kind};
-use crate::chess::r#move::Flag;
 use crate::position::Board;
 use super::attacks;
 
@@ -124,8 +123,7 @@ fn gen_king_moves(board: &Board, king_sq: Square, us: Color, target_mask: Bitboa
         }
 
         if !is_attacked {
-            let flag = if board.us(them).contains(to_sq) { Flag::Capture } else { Flag::Quiet };
-            moves.push(Move::new(king_sq, to_sq, flag));
+            moves.push(Move::new(king_sq, to_sq));
         }
     }
 
@@ -143,7 +141,6 @@ fn gen_piece_moves(
 ) -> Vec<Move> {
     let pieces = board.bitboard(Piece::new(us, kind));
     let blockers = board.occupancy();
-    let their_pieces = board.us(us.flip());
     let mut moves = Vec::new();
 
     for from in pieces {
@@ -168,8 +165,7 @@ fn gen_piece_moves(
         }
 
         for to in attacks {
-            let flag = if their_pieces.contains(to) { Flag::Capture } else { Flag::Quiet };
-            moves.push(Move::new(from, to, flag));
+            moves.push(Move::new(from, to));
         }
     }
 
@@ -189,9 +185,9 @@ fn gen_pawn_moves(
     let their_pieces = board.us(us.flip());
     let mut moves = Vec::new();
 
-    let (forward_shift, start_rank, promo_rank) = match us {
-        Color::White => (8, 1, 7),
-        Color::Black => (-8, 6, 0),
+    let (forward_shift, start_rank) = match us {
+        Color::White => (8, 1),
+        Color::Black => (-8, 6),
     };
 
     for from in pawns {
@@ -207,14 +203,14 @@ fn gen_pawn_moves(
         if !occupancy.contains(single_push_sq) {
             // Check if single push resolves checks or stays on pin ray
             if move_mask.contains(single_push_sq) {
-                add_pawn_move(from, single_push_sq, promo_rank, Flag::Quiet, &mut moves);
+                moves.push(Move::new(from, single_push_sq));
             }
 
             // Double push
             if from.rank() == start_rank {
                 let double_push_sq = Square::new((from.as_usize() as i8 + forward_shift * 2) as u8);
                 if !occupancy.contains(double_push_sq) && move_mask.contains(double_push_sq) {
-                    moves.push(Move::new(from, double_push_sq, Flag::DoublePawnPush));
+                    moves.push(Move::new(from, double_push_sq));
                 }
             }
         }
@@ -224,7 +220,7 @@ fn gen_pawn_moves(
         while !captures.is_empty() {
             let to = captures.lsb();
             captures.clear_bit(to);
-            add_pawn_move(from, to, promo_rank, Flag::Capture, &mut moves);
+            moves.push(Move::new(from, to));
         }
 
         // En passant
@@ -234,7 +230,7 @@ fn gen_pawn_moves(
 
             if !ep_capture.is_empty()
             && is_ep_legal(board, from, ep_sq, king_sq, us) {
-                moves.push(Move::new(from, ep_sq, Flag::EpCapture));
+                moves.push(Move::new(from, ep_sq));
             }
         }
     }
@@ -262,7 +258,7 @@ fn gen_castling_moves(board: &Board, us: Color, king_sq: Square) -> Vec<Move> {
             let attackers_g = get_attackers(board, g_sq, them);
 
             if attackers_f.is_empty() && attackers_g.is_empty() {
-                moves.push(Move::new(king_sq, g_sq, Flag::KingCastle));
+                moves.push(Move::new(king_sq, g_sq));
             }
         }
     }
@@ -282,7 +278,7 @@ fn gen_castling_moves(board: &Board, us: Color, king_sq: Square) -> Vec<Move> {
             let attackers_d = get_attackers(board, d_sq, them);
 
             if attackers_c.is_empty() && attackers_d.is_empty() {
-                moves.push(Move::new(king_sq, c_sq, Flag::QueenCastle));
+                moves.push(Move::new(king_sq, c_sq));
             }
         }
     }
@@ -356,17 +352,6 @@ fn get_pinned_pieces(board: &Board, king_sq: Square, us: Color) -> Bitboard {
     pinned
 }
 
-fn add_pawn_move(from: Square, to: Square, promo_rank: u8, base_flag: Flag, moves: &mut Vec<Move>) {
-    if to.rank() == promo_rank {
-        let is_capture = base_flag == Flag::Capture;
-        moves.push(Move::new(from, to, if is_capture { Flag::QueenPromoCapture } else { Flag::QueenPromo }));
-        moves.push(Move::new(from, to, if is_capture { Flag::RookPromoCapture } else { Flag::RookPromo }));
-        moves.push(Move::new(from, to, if is_capture { Flag::BishopPromoCapture } else { Flag::BishopPromo }));
-        moves.push(Move::new(from, to, if is_capture { Flag::KnightPromoCapture } else { Flag::KnightPromo }));
-    } else {
-        moves.push(Move::new(from, to, base_flag));
-    }
-}
 
 fn is_ep_legal(board: &Board, from: Square, ep_sq: Square, king_sq: Square, us: Color) -> bool {
     let them = us.flip();

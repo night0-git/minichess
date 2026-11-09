@@ -75,7 +75,6 @@ impl std::str::FromStr for Square {
     }
 }
 
-// Allow for to_string() conversion
 impl std::fmt::Display for Square {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}{}", (b'a' + self.file()) as char, (b'1' + self.rank()) as char)
