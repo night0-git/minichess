@@ -1,8 +1,8 @@
-use crate::chess::{Bitboard, Piece, Move, Square};
-use crate::chess::piece::{Color, Kind};
-use crate::chess::r#move::Flag;
-use super::zobrist::ZOBRIST;
 use super::fen;
+use super::zobrist::ZOBRIST;
+use crate::chess::r#move::Flag;
+use crate::chess::piece::{Color, Kind};
+use crate::chess::{Bitboard, Move, Piece, Square};
 
 /// Array used to update castling rights upon moves and captures.
 /// Index by square (0..64).
@@ -15,7 +15,7 @@ pub const CASTLING_MASKS: [u8; 64] = [
     15, 15, 15, 15, 15, 15, 15, 15, // Rank 5
     15, 15, 15, 15, 15, 15, 15, 15, // Rank 6
     15, 15, 15, 15, 15, 15, 15, 15, // Rank 7
-     7, 15, 15, 15,  3, 15, 15, 11, // Rank 8: a8(BQ lost), e8(BK+BQ lost), h8(BK lost)
+    7, 15, 15, 15, 3, 15, 15, 11, // Rank 8: a8(BQ lost), e8(BK+BQ lost), h8(BK lost)
 ];
 
 /// Stores irreversible board data, such data that cannot
@@ -43,7 +43,7 @@ pub struct Board {
     pub(crate) bboards: [Bitboard; 12],
     pub(crate) pieces: [Option<Piece>; 64],
 
-    pub(crate) color_masks: [Bitboard; 2], 
+    pub(crate) color_masks: [Bitboard; 2],
     pub(crate) all_occupancy: Bitboard,
 
     pub side_to_move: Color,
@@ -132,7 +132,7 @@ impl Board {
     pub fn occupancy(&self) -> Bitboard {
         self.all_occupancy
     }
-    
+
     /// Get the bitboard/occupancy of a color
     #[inline(always)]
     pub fn us(&self, color: Color) -> Bitboard {
@@ -163,7 +163,8 @@ impl Board {
         let us = self.side_to_move;
         let them = us.flip();
 
-        let moving_pcs = self.piece_at_color(from, us)
+        let moving_pcs = self
+            .piece_at_color(from, us)
             .expect("Invalid move: no piece at source square");
         let is_capture = self.piece_at_color(to, them).is_some();
 
@@ -192,7 +193,10 @@ impl Board {
             Kind::King => {
                 if (from.rank() == 0 || from.rank() == 7) && from.file() == 4 && to.file() == 6 {
                     Flag::KingCastle
-                } else if (from.rank() == 0 || from.rank() == 7) && from.file() == 4 && to.file() == 2 {
+                } else if (from.rank() == 0 || from.rank() == 7)
+                    && from.file() == 4
+                    && to.file() == 2
+                {
                     Flag::QueenCastle
                 } else if is_capture {
                     Flag::Capture
@@ -221,7 +225,8 @@ impl Board {
         let to = mv.to();
         let flag = self.move_flag(mv);
 
-        let moving_pcs = self.piece_at_color(from, us)
+        let moving_pcs = self
+            .piece_at_color(from, us)
             .expect("Invalid move: no piece at source square");
         // Remove moving piece from source square
         self.remove_piece(moving_pcs, from);
@@ -242,7 +247,7 @@ impl Board {
             Flag::KingCastle => {
                 self.put_piece(moving_pcs, to);
                 let (r_from, r_to) = match us {
-                    Color::White => (Square::new(7), Square::new(5)),   // h1 to f1
+                    Color::White => (Square::new(7), Square::new(5)), // h1 to f1
                     Color::Black => (Square::new(63), Square::new(61)), // h8 to f8
                 };
                 let rook = Piece::new(us, Kind::Rook);
@@ -252,7 +257,7 @@ impl Board {
             Flag::QueenCastle => {
                 self.put_piece(moving_pcs, to);
                 let (r_from, r_to) = match us {
-                    Color::White => (Square::new(0), Square::new(3)),   // a1 to d1
+                    Color::White => (Square::new(0), Square::new(3)), // a1 to d1
                     Color::Black => (Square::new(56), Square::new(59)), // a8 to d8
                 };
                 let rook = Piece::new(us, Kind::Rook);
@@ -274,8 +279,8 @@ impl Board {
                 let promo_kind = match flag {
                     Flag::KnightPromo | Flag::KnightPromoCapture => Kind::Knight,
                     Flag::BishopPromo | Flag::BishopPromoCapture => Kind::Bishop,
-                    Flag::RookPromo   | Flag::RookPromoCapture   => Kind::Rook,
-                    Flag::QueenPromo  | Flag::QueenPromoCapture  => Kind::Queen,
+                    Flag::RookPromo | Flag::RookPromoCapture => Kind::Rook,
+                    Flag::QueenPromo | Flag::QueenPromoCapture => Kind::Queen,
                     _ => unreachable!(),
                 };
                 let promo_piece = Piece::new(us, promo_kind);
@@ -299,7 +304,8 @@ impl Board {
         let flag = self.state.flag;
 
         // Identify and remove the moving piece from destination
-        let moving_pcs = self.piece_at_color(to, us)
+        let moving_pcs = self
+            .piece_at_color(to, us)
             .expect("Invalid unmake: no piece at destination square");
         self.remove_piece(moving_pcs, to);
 
@@ -389,7 +395,13 @@ impl Board {
     }
 
     #[inline]
-    fn update_state(&mut self, mv: Move, flag: Flag, moving_pcs: Piece, captured_pcs: Option<Piece>) {
+    fn update_state(
+        &mut self,
+        mv: Move,
+        flag: Flag,
+        moving_pcs: Piece,
+        captured_pcs: Option<Piece>,
+    ) {
         self.state.captured_pcs = captured_pcs;
         self.state.flag = flag;
 
@@ -417,8 +429,8 @@ impl Board {
         }
 
         // Castling rights update
-        self.state.castling_rights &= CASTLING_MASKS[mv.from().as_usize()]
-            & CASTLING_MASKS[mv.to().as_usize()];
+        self.state.castling_rights &=
+            CASTLING_MASKS[mv.from().as_usize()] & CASTLING_MASKS[mv.to().as_usize()];
 
         // XOR in new state
         self.state.zobrist_key ^= ZOBRIST.castling[self.state.castling_rights as usize];
@@ -437,8 +449,7 @@ impl Board {
 
 impl Default for Board {
     fn default() -> Self {
-        Self::from_fen(fen::STARTING_FEN)
-            .expect("STARTING_FEN is invalid")
+        Self::from_fen(fen::STARTING_FEN).expect("STARTING_FEN is invalid")
     }
 }
 
@@ -459,7 +470,7 @@ impl std::fmt::Display for Board {
         }
         writeln!(f, "  +-----------------+")?;
         writeln!(f, "    a b c d e f g h")?;
-        
+
         writeln!(f, "FEN: {}", self.to_fen())?;
         writeln!(f, "Key: {:016X}", self.state.zobrist_key)
     }

@@ -1,6 +1,6 @@
 use minichess::chess::*;
-use minichess::position::*;
 use minichess::move_gen::*;
+use minichess::position::*;
 use std::str::FromStr;
 
 fn main() {

@@ -2,7 +2,7 @@
 #[repr(u8)]
 pub enum Color {
     White = 0,
-    Black = 1
+    Black = 1,
 }
 
 impl Color {
@@ -22,21 +22,35 @@ pub enum Kind {
     Bishop = 2,
     Rook = 3,
     Queen = 4,
-    King = 5
+    King = 5,
 }
 
 impl Kind {
     pub const ALL: [Self; 6] = [
-        Self::Pawn, Self::Knight, Self::Bishop,
-        Self::Rook, Self::Queen, Self::King
+        Self::Pawn,
+        Self::Knight,
+        Self::Bishop,
+        Self::Rook,
+        Self::Queen,
+        Self::King,
     ];
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Piece {
-    WPawn = 0, WKnight = 1, WBishop = 2, WRook = 3, WQueen = 4, WKing = 5,
-    BPawn = 6, BKnight = 7, BBishop = 8, BRook = 9, BQueen = 10, BKing = 11,
+    WPawn = 0,
+    WKnight = 1,
+    WBishop = 2,
+    WRook = 3,
+    WQueen = 4,
+    WKing = 5,
+    BPawn = 6,
+    BKnight = 7,
+    BBishop = 8,
+    BRook = 9,
+    BQueen = 10,
+    BKing = 11,
 }
 
 impl std::fmt::Display for Piece {
@@ -47,8 +61,18 @@ impl std::fmt::Display for Piece {
 
 impl Piece {
     pub const ALL: [Self; 12] = [
-        Self::WPawn, Self::WKnight, Self::WBishop, Self::WRook, Self::WQueen, Self::WKing,
-        Self::BPawn, Self::BKnight, Self::BBishop, Self::BRook, Self::BQueen, Self::BKing,
+        Self::WPawn,
+        Self::WKnight,
+        Self::WBishop,
+        Self::WRook,
+        Self::WQueen,
+        Self::WKing,
+        Self::BPawn,
+        Self::BKnight,
+        Self::BBishop,
+        Self::BRook,
+        Self::BQueen,
+        Self::BKing,
     ];
 
     #[inline(always)]
@@ -64,7 +88,11 @@ impl Piece {
 
     #[inline(always)]
     pub const fn color(self) -> Color {
-        if (self as u8) < 6 { Color::White } else { Color::Black }
+        if (self as u8) < 6 {
+            Color::White
+        } else {
+            Color::Black
+        }
     }
 
     #[inline(always)]
@@ -87,7 +115,7 @@ impl Piece {
             b'r' => Some(Self::BRook),
             b'q' => Some(Self::BQueen),
             b'k' => Some(Self::BKing),
-            _    => None,
+            _ => None,
         }
     }
 

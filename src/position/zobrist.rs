@@ -6,11 +6,15 @@ pub struct Zobrist {
     pub side_to_move: u64,
 }
 
-struct PRNG { seed: u64 }
+struct Prng {
+    seed: u64,
+}
 
-impl PRNG {
-    const fn new(seed: u64) -> Self { Self { seed } }
-    
+impl Prng {
+    const fn new(seed: u64) -> Self {
+        Self { seed }
+    }
+
     const fn rand(&mut self) -> u64 {
         self.seed ^= self.seed << 13;
         self.seed ^= self.seed >> 7;
@@ -20,8 +24,8 @@ impl PRNG {
 }
 
 const fn init_zobrist() -> Zobrist {
-    let mut prng = PRNG::new(0x98f10715e2bf2f05); // Arbitrary seed
-    
+    let mut prng = Prng::new(0x98f10715e2bf2f05); // Arbitrary seed
+
     let mut z = Zobrist {
         pieces: [[0; 64]; 12],
         castling: [0; 16],

@@ -6,9 +6,9 @@
 mod leaping_attacks;
 mod sliding_attacks;
 
-use crate::chess::{Bitboard, Square};
 use crate::chess::piece::Color;
-use leaping_attacks::{KNIGHT_ATTACKS, PAWN_ATTACKS, KING_ATTACKS};
+use crate::chess::{Bitboard, Square};
+use leaping_attacks::{KING_ATTACKS, KNIGHT_ATTACKS, PAWN_ATTACKS};
 
 #[inline(always)]
 pub fn knight_attacks(sq: Square) -> Bitboard {
@@ -40,8 +40,10 @@ pub fn queen_attacks(sq: Square, blockers: Bitboard) -> Bitboard {
     bishop_attacks(sq, blockers) | rook_attacks(sq, blockers)
 }
 
-pub static RAY_BETWEEN: [[Bitboard; 64]; 64] = include!(concat!(env!("OUT_DIR"), "/ray_between.rs"));
-pub static LINE_THROUGH: [[Bitboard; 64]; 64] = include!(concat!(env!("OUT_DIR"), "/line_through.rs"));
+pub static RAY_BETWEEN: [[Bitboard; 64]; 64] =
+    include!(concat!(env!("OUT_DIR"), "/ray_between.rs"));
+pub static LINE_THROUGH: [[Bitboard; 64]; 64] =
+    include!(concat!(env!("OUT_DIR"), "/line_through.rs"));
 
 /// Returns a bitboard representing the squares between `sq1` and `sq2`,
 /// excluding `sq1` and `sq2`.

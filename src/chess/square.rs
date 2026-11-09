@@ -37,10 +37,14 @@ impl Square {
     }
 
     #[inline(always)]
-    pub const fn rank(self) -> u8 { self.0 / 8 }
+    pub const fn rank(self) -> u8 {
+        self.0 / 8
+    }
 
     #[inline(always)]
-    pub const fn file(self) -> u8 { self.0 % 8 }
+    pub const fn file(self) -> u8 {
+        self.0 % 8
+    }
 
     #[inline(always)]
     pub const fn coords(self) -> (u8, u8) {
@@ -59,10 +63,10 @@ impl std::str::FromStr for Square {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let b = s.as_bytes();
-        if b.len() != 2 { 
-            return Err("Invalid algebraic notation length"); 
+        if b.len() != 2 {
+            return Err("Invalid algebraic notation length");
         }
-        
+
         // Use ASCII arithmetic to map to 0-indexed integers
         let file = b[0].wrapping_sub(b'a');
         let rank = b[1].wrapping_sub(b'1');
@@ -77,6 +81,11 @@ impl std::str::FromStr for Square {
 
 impl std::fmt::Display for Square {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}", (b'a' + self.file()) as char, (b'1' + self.rank()) as char)
+        write!(
+            f,
+            "{}{}",
+            (b'a' + self.file()) as char,
+            (b'1' + self.rank()) as char
+        )
     }
 }

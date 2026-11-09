@@ -1,6 +1,6 @@
 use super::board::Board;
-use crate::chess::piece::{Color, Piece};
 use crate::chess::Square;
+use crate::chess::piece::{Color, Piece};
 use std::fmt::Write;
 
 pub const STARTING_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -59,13 +59,15 @@ pub fn parse(fen: &str) -> Result<Board, &'static str> {
     }
 
     // Halfmove clock
-    board.state.halfmove_clock = parts.next()
+    board.state.halfmove_clock = parts
+        .next()
         .unwrap_or("0")
         .parse::<u32>()
         .map_err(|_| "Invalid halfmove clock")?;
 
     // Fullmove counter
-    board.fullmove_counter = parts.next()
+    board.fullmove_counter = parts
+        .next()
         .unwrap_or("1")
         .parse::<u32>()
         .map_err(|_| "Invalid fullmove counter")?;
@@ -122,10 +124,18 @@ pub fn generate(board: &Board) -> String {
     if board.state.castling_rights == 0 {
         fen.push('-');
     } else {
-        if board.state.castling_rights & 0b0001 != 0 { fen.push('K'); }
-        if board.state.castling_rights & 0b0010 != 0 { fen.push('Q'); }
-        if board.state.castling_rights & 0b0100 != 0 { fen.push('k'); }
-        if board.state.castling_rights & 0b1000 != 0 { fen.push('q'); }
+        if board.state.castling_rights & 0b0001 != 0 {
+            fen.push('K');
+        }
+        if board.state.castling_rights & 0b0010 != 0 {
+            fen.push('Q');
+        }
+        if board.state.castling_rights & 0b0100 != 0 {
+            fen.push('k');
+        }
+        if board.state.castling_rights & 0b1000 != 0 {
+            fen.push('q');
+        }
     }
 
     // En passant target
@@ -137,7 +147,12 @@ pub fn generate(board: &Board) -> String {
     }
 
     // Halfmove clock and fullmove counter
-    write!(&mut fen, " {} {}", board.state.halfmove_clock, board.fullmove_counter).unwrap();
+    write!(
+        &mut fen,
+        " {} {}",
+        board.state.halfmove_clock, board.fullmove_counter
+    )
+    .unwrap();
 
     fen
 }

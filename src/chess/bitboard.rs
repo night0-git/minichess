@@ -29,8 +29,14 @@ pub enum Direction {
 impl Direction {
     /// Returns all possible move directions for iteration.
     pub const ALL: [Direction; 8] = [
-        Direction::North, Direction::South, Direction::East, Direction::West,
-        Direction::NorthEast, Direction::NorthWest, Direction::SouthEast, Direction::SouthWest,
+        Direction::North,
+        Direction::South,
+        Direction::East,
+        Direction::West,
+        Direction::NorthEast,
+        Direction::NorthWest,
+        Direction::SouthEast,
+        Direction::SouthWest,
     ];
 }
 
@@ -41,16 +47,16 @@ impl Bitboard {
     pub const EMPTY: Self = Self(0u64);
     pub const ALL: Self = Self(1u64);
 
-    pub const FILE_A: u64     = 0x0101010101010101;
-    pub const FILE_B: u64     = 0x0202020202020202;
-    pub const FILE_G: u64     = 0x4040404040404040;
-    pub const FILE_H: u64     = 0x8080808080808080;
-    pub const RANK_1: u64     = 0x00000000000000FF;
-    pub const RANK_8: u64     = 0xFF00000000000000;
+    pub const FILE_A: u64 = 0x0101010101010101;
+    pub const FILE_B: u64 = 0x0202020202020202;
+    pub const FILE_G: u64 = 0x4040404040404040;
+    pub const FILE_H: u64 = 0x8080808080808080;
+    pub const RANK_1: u64 = 0x00000000000000FF;
+    pub const RANK_8: u64 = 0xFF00000000000000;
     pub const DIAG_A1_H8: u64 = 0x8040201008040201;
     pub const DIAG_H1_A8: u64 = 0x0102040810204080;
     pub const LIGHT_SQRS: u64 = 0x55AA55AA55AA55AA;
-    pub const DARK_SQRS: u64  = 0xAA55AA55AA55AA55;
+    pub const DARK_SQRS: u64 = 0xAA55AA55AA55AA55;
 }
 
 impl Bitboard {
@@ -93,7 +99,7 @@ impl Bitboard {
     pub const fn cleared_lsb(self) -> Self {
         Self(self.0 & self.0.wrapping_sub(1))
     }
-    
+
     pub fn set_bit(&mut self, sq: Square) {
         self.0 |= sq.mask();
     }
@@ -124,12 +130,12 @@ impl Bitboard {
         match direction {
             Direction::North => Self(self.0 << 8),
             Direction::South => Self(self.0 >> 8),
-            
+
             // Mask out the H-file before shifting east
             Direction::East => Self((self.0 & !Self::FILE_H) << 1),
             Direction::NorthEast => Self((self.0 & !Self::FILE_H) << 9),
             Direction::SouthEast => Self((self.0 & !Self::FILE_H) >> 7),
-            
+
             // Mask out the A-file before shifting west
             Direction::West => Self((self.0 & !Self::FILE_A) >> 1),
             Direction::NorthWest => Self((self.0 & !Self::FILE_A) << 7),

@@ -13,8 +13,10 @@ pub struct Magic {
 pub static BISHOP_MAGICS: [Magic; 64] = include!(concat!(env!("OUT_DIR"), "/bishop_magics.rs"));
 pub static ROOK_MAGICS: [Magic; 64] = include!(concat!(env!("OUT_DIR"), "/rook_magics.rs"));
 
-pub static BISHOP_ATTACKS: [Bitboard; 5248] = include!(concat!(env!("OUT_DIR"), "/bishop_attacks.rs"));
-pub static ROOK_ATTACKS: [Bitboard; 102400] = include!(concat!(env!("OUT_DIR"), "/rook_attacks.rs"));
+pub static BISHOP_ATTACKS: [Bitboard; 5248] =
+    include!(concat!(env!("OUT_DIR"), "/bishop_attacks.rs"));
+pub static ROOK_ATTACKS: [Bitboard; 102400] =
+    include!(concat!(env!("OUT_DIR"), "/rook_attacks.rs"));
 
 #[inline(always)]
 pub fn get_bishop_attacks(sq: Square, blockers: Bitboard) -> Bitboard {

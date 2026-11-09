@@ -1,7 +1,7 @@
-use crate::chess::{Bitboard, Move, Piece, Square};
-use crate::chess::piece::{Color, Kind};
-use crate::position::Board;
 use super::attacks;
+use crate::chess::piece::{Color, Kind};
+use crate::chess::{Bitboard, Move, Piece, Square};
+use crate::position::Board;
 
 /// Generates all valid chess moves, taking into account King safety.
 pub fn gen_all_moves(board: &Board) -> Vec<Move> {
@@ -35,10 +35,38 @@ pub fn gen_all_moves(board: &Board) -> Vec<Move> {
     };
 
     // Generate pseudo-legal moves masked by pins and the target_mask
-    moves.append(&mut gen_piece_moves(board, us, Kind::Knight, pinned, target_mask, king_sq));
-    moves.append(&mut gen_piece_moves(board, us, Kind::Bishop, pinned, target_mask, king_sq));
-    moves.append(&mut gen_piece_moves(board, us, Kind::Rook, pinned, target_mask, king_sq));
-    moves.append(&mut gen_piece_moves(board, us, Kind::Queen, pinned, target_mask, king_sq));
+    moves.append(&mut gen_piece_moves(
+        board,
+        us,
+        Kind::Knight,
+        pinned,
+        target_mask,
+        king_sq,
+    ));
+    moves.append(&mut gen_piece_moves(
+        board,
+        us,
+        Kind::Bishop,
+        pinned,
+        target_mask,
+        king_sq,
+    ));
+    moves.append(&mut gen_piece_moves(
+        board,
+        us,
+        Kind::Rook,
+        pinned,
+        target_mask,
+        king_sq,
+    ));
+    moves.append(&mut gen_piece_moves(
+        board,
+        us,
+        Kind::Queen,
+        pinned,
+        target_mask,
+        king_sq,
+    ));
 
     moves.append(&mut gen_pawn_moves(board, us, pinned, target_mask, king_sq));
     if num_checkers == 0 {
@@ -71,10 +99,38 @@ pub fn gen_qsearch_moves(board: &Board) -> Vec<Move> {
 
     moves.append(&mut gen_king_moves(board, king_sq, us, target_mask));
 
-    moves.append(&mut gen_piece_moves(board, us, Kind::Knight, pinned, target_mask, king_sq));
-    moves.append(&mut gen_piece_moves(board, us, Kind::Bishop, pinned, target_mask, king_sq));
-    moves.append(&mut gen_piece_moves(board, us, Kind::Rook, pinned, target_mask, king_sq));
-    moves.append(&mut gen_piece_moves(board, us, Kind::Queen, pinned, target_mask, king_sq));
+    moves.append(&mut gen_piece_moves(
+        board,
+        us,
+        Kind::Knight,
+        pinned,
+        target_mask,
+        king_sq,
+    ));
+    moves.append(&mut gen_piece_moves(
+        board,
+        us,
+        Kind::Bishop,
+        pinned,
+        target_mask,
+        king_sq,
+    ));
+    moves.append(&mut gen_piece_moves(
+        board,
+        us,
+        Kind::Rook,
+        pinned,
+        target_mask,
+        king_sq,
+    ));
+    moves.append(&mut gen_piece_moves(
+        board,
+        us,
+        Kind::Queen,
+        pinned,
+        target_mask,
+        king_sq,
+    ));
 
     let promo_rank_mask = match us {
         Color::White => Bitboard::new(Bitboard::RANK_8),
@@ -103,20 +159,26 @@ fn gen_king_moves(board: &Board, king_sq: Square, us: Color, target_mask: Bitboa
         let mut is_attacked = false;
 
         // Leaping pieces
-        if !(attacks::knight_attacks(to_sq) & board.bitboard(Piece::new(them, Kind::Knight))).is_empty()
-        || !(attacks::pawn_attacks(to_sq, us) & board.bitboard(Piece::new(them, Kind::Pawn))).is_empty()
-        || !(attacks::king_attacks(to_sq) & board.bitboard(Piece::new(them, Kind::King))).is_empty() {
+        if !(attacks::knight_attacks(to_sq) & board.bitboard(Piece::new(them, Kind::Knight)))
+            .is_empty()
+            || !(attacks::pawn_attacks(to_sq, us) & board.bitboard(Piece::new(them, Kind::Pawn)))
+                .is_empty()
+            || !(attacks::king_attacks(to_sq) & board.bitboard(Piece::new(them, Kind::King)))
+                .is_empty()
+        {
             is_attacked = true;
         } else {
             // Sliding pieces
             let bishops_queens = board.bitboard(Piece::new(them, Kind::Bishop))
-                               | board.bitboard(Piece::new(them, Kind::Queen));
-            if !(attacks::bishop_attacks(to_sq, blockers_without_king) & bishops_queens).is_empty() {
+                | board.bitboard(Piece::new(them, Kind::Queen));
+            if !(attacks::bishop_attacks(to_sq, blockers_without_king) & bishops_queens).is_empty()
+            {
                 is_attacked = true;
             } else {
                 let rooks_queens = board.bitboard(Piece::new(them, Kind::Rook))
-                                 | board.bitboard(Piece::new(them, Kind::Queen));
-                if !(attacks::rook_attacks(to_sq, blockers_without_king) & rooks_queens).is_empty() {
+                    | board.bitboard(Piece::new(them, Kind::Queen));
+                if !(attacks::rook_attacks(to_sq, blockers_without_king) & rooks_queens).is_empty()
+                {
                     is_attacked = true;
                 }
             }
@@ -148,7 +210,9 @@ fn gen_piece_moves(
             Kind::Knight => attacks::knight_attacks(from),
             Kind::Bishop => attacks::bishop_attacks(from, blockers),
             Kind::Rook => attacks::rook_attacks(from, blockers),
-            Kind::Queen => attacks::bishop_attacks(from, blockers) | attacks::rook_attacks(from, blockers),
+            Kind::Queen => {
+                attacks::bishop_attacks(from, blockers) | attacks::rook_attacks(from, blockers)
+            }
             _ => unreachable!("Invalid type for gen_piece_moves"),
         };
 
@@ -228,8 +292,7 @@ fn gen_pawn_moves(
             let ep_bb = Bitboard::new(ep_sq.mask());
             let ep_capture = attacks::pawn_attacks(from, us) & ep_bb;
 
-            if !ep_capture.is_empty()
-            && is_ep_legal(board, from, ep_sq, king_sq, us) {
+            if !ep_capture.is_empty() && is_ep_legal(board, from, ep_sq, king_sq, us) {
                 moves.push(Move::new(from, ep_sq));
             }
         }
@@ -293,23 +356,22 @@ fn get_attackers(board: &Board, sq: Square, attacker_col: Color) -> Bitboard {
 
     // Leaping attacks
     attackers |= attacks::pawn_attacks(sq, defender_col)
-               & board.bitboard(Piece::new(attacker_col, Kind::Pawn));
+        & board.bitboard(Piece::new(attacker_col, Kind::Pawn));
 
-    attackers |= attacks::knight_attacks(sq)
-               & board.bitboard(Piece::new(attacker_col, Kind::Knight));
+    attackers |=
+        attacks::knight_attacks(sq) & board.bitboard(Piece::new(attacker_col, Kind::Knight));
 
-    attackers |= attacks::king_attacks(sq)
-               & board.bitboard(Piece::new(attacker_col, Kind::King));
+    attackers |= attacks::king_attacks(sq) & board.bitboard(Piece::new(attacker_col, Kind::King));
 
     let blockers = board.occupancy();
 
     // Sliding attacks
     let bishops_queens = board.bitboard(Piece::new(attacker_col, Kind::Bishop))
-                       | board.bitboard(Piece::new(attacker_col, Kind::Queen));
+        | board.bitboard(Piece::new(attacker_col, Kind::Queen));
     attackers |= attacks::bishop_attacks(sq, blockers) & bishops_queens;
 
     let rooks_queens = board.bitboard(Piece::new(attacker_col, Kind::Rook))
-                     | board.bitboard(Piece::new(attacker_col, Kind::Queen));
+        | board.bitboard(Piece::new(attacker_col, Kind::Queen));
     attackers |= attacks::rook_attacks(sq, blockers) & rooks_queens;
 
     attackers
@@ -325,7 +387,7 @@ fn get_pinned_pieces(board: &Board, king_sq: Square, us: Color) -> Bitboard {
 
     // Orthogonal pins
     let enemy_ortho = board.bitboard(Piece::new(them, Kind::Rook))
-                    | board.bitboard(Piece::new(them, Kind::Queen));
+        | board.bitboard(Piece::new(them, Kind::Queen));
 
     let ortho_pinners = attacks::rook_attacks(king_sq, board.us(them)) & enemy_ortho;
 
@@ -338,7 +400,7 @@ fn get_pinned_pieces(board: &Board, king_sq: Square, us: Color) -> Bitboard {
 
     // Diagonal pins
     let enemy_diag = board.bitboard(Piece::new(them, Kind::Bishop))
-                   | board.bitboard(Piece::new(them, Kind::Queen));
+        | board.bitboard(Piece::new(them, Kind::Queen));
 
     let diag_pinners = attacks::bishop_attacks(king_sq, their_pieces) & enemy_diag;
 
@@ -351,7 +413,6 @@ fn get_pinned_pieces(board: &Board, king_sq: Square, us: Color) -> Bitboard {
 
     pinned
 }
-
 
 fn is_ep_legal(board: &Board, from: Square, ep_sq: Square, king_sq: Square, us: Color) -> bool {
     let them = us.flip();
@@ -370,7 +431,7 @@ fn is_ep_legal(board: &Board, from: Square, ep_sq: Square, king_sq: Square, us: 
 
     // Check if the king is attacked horizontally by a rook or queen
     let rooks_queens = board.bitboard(Piece::new(them, Kind::Rook))
-                     | board.bitboard(Piece::new(them, Kind::Queen));
+        | board.bitboard(Piece::new(them, Kind::Queen));
 
     let horizontal_attacks = attacks::rook_attacks(king_sq, modified_occupancy) & rooks_queens;
 
@@ -380,7 +441,7 @@ fn is_ep_legal(board: &Board, from: Square, ep_sq: Square, king_sq: Square, us: 
 
     // Check diagonal attacks (in case the EP capture opened a diagonal)
     let bishops_queens = board.bitboard(Piece::new(them, Kind::Bishop))
-                       | board.bitboard(Piece::new(them, Kind::Queen));
+        | board.bitboard(Piece::new(them, Kind::Queen));
 
     let diagonal_attacks = attacks::bishop_attacks(king_sq, modified_occupancy) & bishops_queens;
 

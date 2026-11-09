@@ -3,7 +3,9 @@ use crate::position::board::Board;
 const INF: i32 = i32::MAX;
 const NEG_INF: i32 = i32::MIN;
 
-fn evaluate(board: &Board) -> i32 { return 0; }
+fn evaluate(_board: &Board) -> i32 {
+    0
+}
 
 /// Quiescence search for the maximizing player
 fn quiesce_max(board: &mut Board, mut alpha: i32, beta: i32) -> i32 {
