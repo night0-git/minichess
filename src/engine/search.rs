@@ -1,12 +1,10 @@
+use crate::engine::evaluate;
 use crate::position::board::Board;
 
 // i32::MIN has an absolute value 1 greater than i32::MAX, negating it will cause an overflow.
 const NEG_INF: i32 = i32::MIN + 1;
 
-fn evaluate(_board: &Board) -> i32 {
-    0
-}
-
+/// Find the minimax score of the current board state.
 pub fn alpha_beta(board: &mut Board, mut alpha: i32, beta: i32, depth_left: i32) -> i32 {
     if depth_left == 0 {
         return quiesce(board, alpha, beta);
