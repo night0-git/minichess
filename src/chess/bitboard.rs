@@ -161,6 +161,33 @@ impl Bitboard {
         x = ((x >> 4) & k4) | ((x & k4) << 4);
         Self(x)
     }
+
+    /// Returns a pretty-formatted ASCII representation of the bitboard.
+    pub fn pretty(&self) -> String {
+        use std::fmt::Write;
+        let mut s = String::new();
+        writeln!(&mut s, "  +-----------------+").unwrap();
+        for rank in (0..8).rev() {
+            write!(&mut s, "{} | ", rank + 1).unwrap();
+            for file in 0..8 {
+                let sq = Square::from_coords(rank, file);
+                if self.contains(sq) {
+                    write!(&mut s, "X ").unwrap();
+                } else {
+                    write!(&mut s, ". ").unwrap();
+                }
+            }
+            writeln!(&mut s, "|").unwrap();
+        }
+        writeln!(&mut s, "  +-----------------+").unwrap();
+        writeln!(&mut s, "    a b c d e f g h").unwrap();
+        s
+    }
+
+    /// Prints the pretty-formatted ASCII representation of the bitboard to standard output.
+    pub fn pretty_print(&self) {
+        print!("{}", self.pretty());
+    }
 }
 
 impl std::ops::BitAnd for Bitboard {
@@ -227,25 +254,5 @@ impl Iterator for Bitboard {
         } else {
             Some(self.pop_lsb())
         }
-    }
-}
-
-impl std::fmt::Display for Bitboard {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "  +-----------------+")?;
-        for rank in (0..8).rev() {
-            write!(f, "{} | ", rank + 1)?;
-            for file in 0..8 {
-                let sq = Square::from_coords(rank, file);
-                if self.contains(sq) {
-                    write!(f, "X ")?; // Bit is set
-                } else {
-                    write!(f, ". ")?; // Bit is empty
-                }
-            }
-            writeln!(f, "|")?;
-        }
-        writeln!(f, "  +-----------------+")?;
-        writeln!(f, "    a b c d e f g h")
     }
 }
