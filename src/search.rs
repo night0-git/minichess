@@ -1,6 +1,7 @@
 use crate::position::board::Board;
 
-const NEG_INF: i32 = i32::MIN;
+// i32::MIN has an absolute value 1 greater than i32::MAX, negating it will cause an overflow.
+const NEG_INF: i32 = i32::MIN + 1;
 
 fn evaluate(_board: &Board) -> i32 {
     0
