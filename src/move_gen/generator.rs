@@ -1,6 +1,6 @@
 use super::attacks;
 use crate::chess::piece::{Color, Kind};
-use crate::chess::{Bitboard, Move, Piece, Square};
+use crate::chess::{Bitboard, Flag, Move, Piece, Square};
 use crate::position::Board;
 
 /// Generates all valid chess moves, taking into account King safety.
@@ -149,6 +149,7 @@ pub fn gen_qsearch_moves(board: &Board) -> Vec<Move> {
 fn gen_king_moves(board: &Board, king_sq: Square, us: Color, target_mask: Bitboard) -> Vec<Move> {
     let king_attacks = attacks::king_attacks(king_sq) & target_mask;
     let them = us.flip();
+    let their_pieces = board.us(them);
     let mut moves = Vec::new();
 
     // Temporarily clear the king from the blockers mask to expose X-ray attacks behind it
@@ -185,7 +186,12 @@ fn gen_king_moves(board: &Board, king_sq: Square, us: Color, target_mask: Bitboa
         }
 
         if !is_attacked {
-            moves.push(Move::new(king_sq, to_sq));
+            let flag = if their_pieces.contains(to_sq) {
+                Flag::Capture
+            } else {
+                Flag::Quiet
+            };
+            moves.push(Move::new_with_flag(king_sq, to_sq, flag));
         }
     }
 
@@ -203,6 +209,7 @@ fn gen_piece_moves(
 ) -> Vec<Move> {
     let pieces = board.bitboard(Piece::new(us, kind));
     let blockers = board.occupancy();
+    let their_pieces = board.us(us.flip());
     let mut moves = Vec::new();
 
     for from in pieces {
@@ -229,7 +236,12 @@ fn gen_piece_moves(
         }
 
         for to in attacks {
-            moves.push(Move::new(from, to));
+            let flag = if their_pieces.contains(to) {
+                Flag::Capture
+            } else {
+                Flag::Quiet
+            };
+            moves.push(Move::new_with_flag(from, to, flag));
         }
     }
 
@@ -267,14 +279,18 @@ fn gen_pawn_moves(
         if !occupancy.contains(single_push_sq) {
             // Check if single push resolves checks or stays on pin ray
             if move_mask.contains(single_push_sq) {
-                moves.push(Move::new(from, single_push_sq));
+                moves.push(Move::new_with_flag(from, single_push_sq, Flag::Quiet));
             }
 
             // Double push
             if from.rank() == start_rank {
                 let double_push_sq = Square::new((from.as_usize() as i8 + forward_shift * 2) as u8);
                 if !occupancy.contains(double_push_sq) && move_mask.contains(double_push_sq) {
-                    moves.push(Move::new(from, double_push_sq));
+                    moves.push(Move::new_with_flag(
+                        from,
+                        double_push_sq,
+                        Flag::DoublePawnPush,
+                    ));
                 }
             }
         }
@@ -284,7 +300,7 @@ fn gen_pawn_moves(
         while !captures.is_empty() {
             let to = captures.lsb();
             captures.clear_bit(to);
-            moves.push(Move::new(from, to));
+            moves.push(Move::new_with_flag(from, to, Flag::Capture));
         }
 
         // En passant
@@ -293,7 +309,7 @@ fn gen_pawn_moves(
             let ep_capture = attacks::pawn_attacks(from, us) & ep_bb;
 
             if !ep_capture.is_empty() && is_ep_legal(board, from, ep_sq, king_sq, us) {
-                moves.push(Move::new(from, ep_sq));
+                moves.push(Move::new_with_flag(from, ep_sq, Flag::EpCapture));
             }
         }
     }
@@ -321,7 +337,7 @@ fn gen_castling_moves(board: &Board, us: Color, king_sq: Square) -> Vec<Move> {
             let attackers_g = get_attackers(board, g_sq, them);
 
             if attackers_f.is_empty() && attackers_g.is_empty() {
-                moves.push(Move::new(king_sq, g_sq));
+                moves.push(Move::new_with_flag(king_sq, g_sq, Flag::KingCastle));
             }
         }
     }
@@ -341,7 +357,7 @@ fn gen_castling_moves(board: &Board, us: Color, king_sq: Square) -> Vec<Move> {
             let attackers_d = get_attackers(board, d_sq, them);
 
             if attackers_c.is_empty() && attackers_d.is_empty() {
-                moves.push(Move::new(king_sq, c_sq));
+                moves.push(Move::new_with_flag(king_sq, c_sq, Flag::QueenCastle));
             }
         }
     }

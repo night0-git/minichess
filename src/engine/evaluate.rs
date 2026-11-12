@@ -277,10 +277,12 @@ mod tests {
     fn black_perspective_flips_score() {
         // White plays 1. e4, gaining a slight positional advantage.
         let mut board = Board::default();
-        board.make_move(Move::from_str("e2e4").unwrap());
+        let mv = board
+            .try_make_move(Move::from_str("e2e4").unwrap())
+            .unwrap();
         let eval_black = evaluate(&board);
 
-        board.unmake_move(Move::from_str("e2e4").unwrap());
+        board.unmake_move(mv);
         let eval_white = evaluate(&board);
         assert_eq!(eval_white, 0);
 

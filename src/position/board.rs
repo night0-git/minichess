@@ -13,8 +13,10 @@ pub enum Error {
     IllegalMove(Move),
     #[error("no state history to unmake")]
     EmptyHistory,
-    #[error("no piece at destination square {0} during unmake")]
+    #[error("no piece at destination square {0}")]
     NoPieceAtDestination(Square),
+    #[error("pawn move to back rank missing promotion piece: {0}")]
+    MissingPromotion(Move),
     #[error(transparent)]
     Fen(#[from] fen::ParseError),
 }
@@ -42,7 +44,6 @@ pub struct State {
     pub halfmove_clock: u32,
     pub captured_pcs: Option<Piece>,
     pub zobrist_key: u64,
-    pub flag: Flag,
 }
 
 impl State {
@@ -92,7 +93,6 @@ impl Board {
                 halfmove_clock: 0,
                 captured_pcs: None,
                 zobrist_key: 0,
-                flag: Flag::Quiet,
             },
             history: Vec::with_capacity(256),
         }
@@ -172,7 +172,8 @@ impl Board {
         }
     }
 
-    pub fn move_flag(&self, mv: Move) -> Flag {
+    /// Deduce flag for a move on the current board.
+    pub fn move_flag(&self, mv: Move) -> Result<Flag, Error> {
         let from = mv.from();
         let to = mv.to();
         let us = self.side_to_move;
@@ -180,7 +181,7 @@ impl Board {
 
         let moving_pcs = self
             .piece_at_color(from, us)
-            .expect("Invalid move: no piece at source square");
+            .ok_or(Error::NoPieceAtSource(from))?;
         let is_capture = self.piece_at_color(to, them).is_some();
 
         match moving_pcs.kind() {
@@ -190,47 +191,50 @@ impl Board {
                     Color::Black => 0,
                 };
                 if to.rank() == promo_rank {
-                    if is_capture {
-                        Flag::QueenPromoCapture
-                    } else {
-                        Flag::QueenPromo
-                    }
+                    let promo = mv.promotion().ok_or(Error::MissingPromotion(mv))?;
+                    Flag::promo(promo, is_capture).ok_or(Error::IllegalMove(mv))
                 } else if self.state.ep_square == Some(to) && from.file() != to.file() {
-                    Flag::EpCapture
+                    Ok(Flag::EpCapture)
                 } else if (from.rank() as i8 - to.rank() as i8).abs() == 2 {
-                    Flag::DoublePawnPush
+                    Ok(Flag::DoublePawnPush)
                 } else if is_capture {
-                    Flag::Capture
+                    Ok(Flag::Capture)
                 } else {
-                    Flag::Quiet
+                    Ok(Flag::Quiet)
                 }
             }
             Kind::King => {
                 if (from.rank() == 0 || from.rank() == 7) && from.file() == 4 && to.file() == 6 {
-                    Flag::KingCastle
+                    Ok(Flag::KingCastle)
                 } else if (from.rank() == 0 || from.rank() == 7)
                     && from.file() == 4
                     && to.file() == 2
                 {
-                    Flag::QueenCastle
+                    Ok(Flag::QueenCastle)
                 } else if is_capture {
-                    Flag::Capture
+                    Ok(Flag::Capture)
                 } else {
-                    Flag::Quiet
+                    Ok(Flag::Quiet)
                 }
             }
             _ => {
                 if is_capture {
-                    Flag::Capture
+                    Ok(Flag::Capture)
                 } else {
-                    Flag::Quiet
+                    Ok(Flag::Quiet)
                 }
             }
         }
     }
 
+    /// Make a fully flagged move on the board without validating legality, can panic.
     #[allow(clippy::collapsible_if)]
     pub fn make_move(&mut self, mv: Move) {
+        debug_assert_eq!(
+            self.move_flag(mv),
+            Ok(mv.flag()),
+            "make_move requires a move with matching flag: {mv}"
+        );
         self.history.push(self.state);
 
         let us = self.side_to_move;
@@ -238,7 +242,7 @@ impl Board {
 
         let from = mv.from();
         let to = mv.to();
-        let flag = self.move_flag(mv);
+        let flag = mv.flag();
 
         let moving_pcs = self
             .piece_at_color(from, us)
@@ -248,7 +252,7 @@ impl Board {
 
         // Handle capture
         let mut captured_pcs = None;
-        if flag as u8 >= Flag::Capture as u8 && flag != Flag::EpCapture {
+        if flag.is_capture() && flag != Flag::EpCapture {
             if let Some(captured) = self.piece_at_color(to, them) {
                 self.remove_piece(captured, to);
                 captured_pcs = Some(captured);
@@ -291,13 +295,7 @@ impl Board {
             }
             // Promotions
             _ => {
-                let promo_kind = match flag {
-                    Flag::KnightPromo | Flag::KnightPromoCapture => Kind::Knight,
-                    Flag::BishopPromo | Flag::BishopPromoCapture => Kind::Bishop,
-                    Flag::RookPromo | Flag::RookPromoCapture => Kind::Rook,
-                    Flag::QueenPromo | Flag::QueenPromoCapture => Kind::Queen,
-                    _ => unreachable!(),
-                };
+                let promo_kind = mv.promotion().expect("Invalid promotion flag");
                 let promo_piece = Piece::new(us, promo_kind);
                 self.put_piece(promo_piece, to);
             }
@@ -306,7 +304,10 @@ impl Board {
         self.update_state(mv, flag, moving_pcs, captured_pcs);
     }
 
+    /// Unmake a flagged move from board history, can panic.
     pub fn unmake_move(&mut self, mv: Move) {
+        let prev_state = self.history.pop().expect("No state history to unmake");
+
         // Revert turn and counters
         let us = self.side_to_move.flip();
         self.side_to_move = us;
@@ -316,7 +317,7 @@ impl Board {
 
         let from = mv.from();
         let to = mv.to();
-        let flag = self.state.flag;
+        let flag = mv.flag();
 
         // Identify and remove the moving piece from destination
         let moving_pcs = self
@@ -325,7 +326,7 @@ impl Board {
         self.remove_piece(moving_pcs, to);
 
         // Restore the piece to its source square
-        if flag as u8 >= Flag::KnightPromo as u8 {
+        if flag.is_promotion() {
             let pawn = Piece::new(us, Kind::Pawn);
             self.put_piece(pawn, from);
         } else {
@@ -369,23 +370,19 @@ impl Board {
         }
 
         // Restore irreversible state
-        self.state = self.history.pop().expect("No state history to unmake");
+        self.state = prev_state;
     }
 
-    /// Attempt to make a move, verifying that there is a piece belonging to the side to move
-    /// at the source square. Returns an error instead of panicking if invalid.
-    pub fn try_make_move(&mut self, mv: Move) -> Result<(), Error> {
-        let us = self.side_to_move;
-        let from = mv.from();
-        if self.piece_at_color(from, us).is_none() {
-            return Err(Error::NoPieceAtSource(from));
-        }
-        self.make_move(mv);
-        Ok(())
+    /// Resolve the move flag from the current board and make the move,
+    /// returning the resolved (flagged) move or an error instead of panicking.
+    pub fn try_make_move(&mut self, mv: Move) -> Result<Move, Error> {
+        let flag = self.move_flag(mv)?;
+        let resolved = mv.with_flag(flag);
+        self.make_move(resolved);
+        Ok(resolved)
     }
 
-    /// Attempt to unmake a move, verifying that history is non-empty and that there is a piece
-    /// at the destination square. Returns an error instead of panicking if invalid.
+    /// Attempt to unmake a flagged move, returning an error instead of panicking if invalid.
     pub fn try_unmake_move(&mut self, mv: Move) -> Result<(), Error> {
         if self.history.is_empty() {
             return Err(Error::EmptyHistory);
@@ -445,7 +442,6 @@ impl Board {
         captured_pcs: Option<Piece>,
     ) {
         self.state.captured_pcs = captured_pcs;
-        self.state.flag = flag;
 
         // Update zobrist key: XOR out old state
         self.state.zobrist_key ^= ZOBRIST.castling[self.state.castling_rights as usize];
@@ -536,9 +532,10 @@ mod tests {
         let initial_fen = board.to_fen();
         let initial_key = board.state.zobrist_key;
 
-        let mv = Move::from_str("e2e4").unwrap();
+        let mv = Move::from_str("e2e4")
+            .unwrap()
+            .with_flag(Flag::DoublePawnPush);
         board.make_move(mv);
-        assert_eq!(board.state.flag, Flag::DoublePawnPush);
         assert_eq!(board.state.ep_square, Some(Square::from_str("e3").unwrap()));
 
         board.unmake_move(mv);
@@ -550,14 +547,18 @@ mod tests {
     fn makes_and_unmakes_regular_capture() {
         // e4, d5, exd5
         let mut board = Board::default();
-        board.make_move(Move::from_str("e2e4").unwrap());
-        board.make_move(Move::from_str("d7d5").unwrap());
+        board
+            .try_make_move(Move::from_str("e2e4").unwrap())
+            .unwrap();
+        board
+            .try_make_move(Move::from_str("d7d5").unwrap())
+            .unwrap();
         let fen_before_cap = board.to_fen();
         let key_before_cap = board.state.zobrist_key;
 
-        let cap_mv = Move::from_str("e4d5").unwrap();
+        let cap_mv = Move::from_str("e4d5").unwrap().with_flag(Flag::Capture);
         board.make_move(cap_mv);
-        assert_eq!(board.state.flag, Flag::Capture);
+        assert_eq!(board.state.captured_pcs, Some(Piece::BPawn));
 
         board.unmake_move(cap_mv);
         assert_eq!(board.to_fen(), fen_before_cap);
@@ -569,14 +570,17 @@ mod tests {
         // 1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. O-O
         let mut board = Board::default();
         for m in &["e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5"] {
-            board.make_move(Move::from_str(m).unwrap());
+            board.try_make_move(Move::from_str(m).unwrap()).unwrap();
         }
         let fen_before_castle = board.to_fen();
         let key_before_castle = board.state.zobrist_key;
 
-        let castle_mv = Move::from_str("e1g1").unwrap();
+        let castle_mv = Move::from_str("e1g1").unwrap().with_flag(Flag::KingCastle);
         board.make_move(castle_mv);
-        assert_eq!(board.state.flag, Flag::KingCastle);
+        assert_eq!(
+            board.piece_at(Square::from_str("f1").unwrap()),
+            Some(Piece::WRook)
+        );
 
         board.unmake_move(castle_mv);
         assert_eq!(board.to_fen(), fen_before_castle);
@@ -588,18 +592,39 @@ mod tests {
         // 1. e4 a6 2. e5 d5 3. exd6
         let mut board = Board::default();
         for m in &["e2e4", "a7a6", "e4e5", "d7d5"] {
-            board.make_move(Move::from_str(m).unwrap());
+            board.try_make_move(Move::from_str(m).unwrap()).unwrap();
         }
         let fen_before_ep = board.to_fen();
         let key_before_ep = board.state.zobrist_key;
 
-        let ep_mv = Move::from_str("e5d6").unwrap();
+        let ep_mv = Move::from_str("e5d6").unwrap().with_flag(Flag::EpCapture);
         board.make_move(ep_mv);
-        assert_eq!(board.state.flag, Flag::EpCapture);
+        assert_eq!(board.piece_at(Square::from_str("d5").unwrap()), None);
 
         board.unmake_move(ep_mv);
         assert_eq!(board.to_fen(), fen_before_ep);
         assert_eq!(board.state.zobrist_key, key_before_ep);
+    }
+
+    #[test]
+    fn makes_and_unmakes_promotion_capture() {
+        let mut board = Board::from_fen("3r4/4P3/8/8/8/8/8/k6K w - - 0 1").unwrap();
+        let initial_fen = board.to_fen();
+        let initial_key = board.state.zobrist_key;
+
+        let mv = Move::from_str("e7d8q")
+            .unwrap()
+            .with_flag(Flag::QueenPromoCapture);
+        board.make_move(mv);
+        assert_eq!(
+            board.piece_at(Square::from_str("d8").unwrap()),
+            Some(Piece::WQueen)
+        );
+        assert_eq!(board.state.captured_pcs, Some(Piece::BRook));
+
+        board.unmake_move(mv);
+        assert_eq!(board.to_fen(), initial_fen);
+        assert_eq!(board.state.zobrist_key, initial_key);
     }
 
     #[test]
@@ -613,15 +638,28 @@ mod tests {
             Err(Error::NoPieceAtSource(Square::from_str("e7").unwrap()))
         );
 
+        // Missing promotion on pawn push to back rank reports error
+        let mut promo_board = Board::from_fen("8/4P3/8/8/8/8/8/k6K w - - 0 1").unwrap();
+        let unpromoted_mv = Move::from_str("e7e8").unwrap();
+        assert_eq!(
+            promo_board.move_flag(unpromoted_mv),
+            Err(Error::MissingPromotion(unpromoted_mv))
+        );
+        assert_eq!(
+            promo_board.try_make_move(unpromoted_mv),
+            Err(Error::MissingPromotion(unpromoted_mv))
+        );
+
         // Cannot unmake when history is empty
         assert_eq!(
             board.try_unmake_move(Move::from_str("e2e4").unwrap()),
             Err(Error::EmptyHistory)
         );
 
-        // Make a valid move
-        let valid_mv = Move::from_str("e2e4").unwrap();
-        assert!(board.try_make_move(valid_mv).is_ok());
+        // Make a valid move and verify resolved flag is returned
+        let raw_mv = Move::from_str("e2e4").unwrap();
+        let valid_mv = board.try_make_move(raw_mv).unwrap();
+        assert_eq!(valid_mv.flag(), Flag::DoublePawnPush);
 
         // Now try unmake with mismatched move (no white piece on a8)
         let wrong_unmake = Move::from_str("a7a8").unwrap();
@@ -632,5 +670,14 @@ mod tests {
 
         // Correct unmake works
         assert!(board.try_unmake_move(valid_mv).is_ok());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "make_move requires a move with matching flag")]
+    fn make_move_unpromoted_pawn_to_back_rank_panics_in_debug() {
+        let mut promo_board = Board::from_fen("8/4P3/8/8/8/8/8/k6K w - - 0 1").unwrap();
+        let unpromoted_mv = Move::from_str("e7e8").unwrap();
+        promo_board.make_move(unpromoted_mv);
     }
 }

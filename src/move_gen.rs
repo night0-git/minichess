@@ -7,9 +7,17 @@ pub use generator::gen_qsearch_moves;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chess::{Move, Square};
+    use crate::chess::{Flag, Move, Square};
     use crate::position::Board;
     use std::str::FromStr;
+
+    fn mv(s: &str, flag: Flag) -> Move {
+        Move::from_str(s).unwrap().with_flag(flag)
+    }
+
+    fn has_uci(moves: &[Move], uci: &str) -> bool {
+        moves.iter().any(|m| m.to_string() == uci)
+    }
 
     fn perft(board: &mut Board, depth: usize) -> u64 {
         if depth == 0 {
@@ -42,12 +50,17 @@ mod tests {
         fn contains_all_pawn_pushes() {
             let board = Board::default();
             let moves = gen_all_moves(&board);
-            let expected_pawns = [
-                "a2a3", "a2a4", "b2b3", "b2b4", "c2c3", "c2c4", "d2d3", "d2d4", "e2e3", "e2e4",
-                "f2f3", "f2f4", "g2g3", "g2g4", "h2h3", "h2h4",
+            let single_pushes = [
+                "a2a3", "b2b3", "c2c3", "d2d3", "e2e3", "f2f3", "g2g3", "h2h3",
             ];
-            for mv_str in &expected_pawns {
-                assert!(moves.contains(&Move::from_str(mv_str).unwrap()));
+            let double_pushes = [
+                "a2a4", "b2b4", "c2c4", "d2d4", "e2e4", "f2f4", "g2g4", "h2h4",
+            ];
+            for mv_str in &single_pushes {
+                assert!(moves.contains(&mv(mv_str, Flag::Quiet)));
+            }
+            for mv_str in &double_pushes {
+                assert!(moves.contains(&mv(mv_str, Flag::DoublePawnPush)));
             }
         }
 
@@ -79,6 +92,12 @@ mod tests {
             let mut board = Board::default();
             assert_eq!(perft(&mut board, 2), 400);
         }
+
+        #[test]
+        fn perft_depth_3_is_8902() {
+            let mut board = Board::default();
+            assert_eq!(perft(&mut board, 3), 8902);
+        }
     }
 
     mod castling {
@@ -88,48 +107,48 @@ mod tests {
         fn both_kingside_and_queenside_available_on_open_board() {
             let board = Board::from_fen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(moves.contains(&Move::from_str("e1g1").unwrap()));
-            assert!(moves.contains(&Move::from_str("e1c1").unwrap()));
+            assert!(moves.contains(&mv("e1g1", Flag::KingCastle)));
+            assert!(moves.contains(&mv("e1c1", Flag::QueenCastle)));
         }
 
         #[test]
         fn king_in_check_cannot_castle() {
             let board = Board::from_fen("r3k2r/8/8/8/4r3/8/8/R3K2R w KQkq - 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(!moves.contains(&Move::from_str("e1g1").unwrap()));
-            assert!(!moves.contains(&Move::from_str("e1c1").unwrap()));
+            assert!(!has_uci(&moves, "e1g1"));
+            assert!(!has_uci(&moves, "e1c1"));
         }
 
         #[test]
         fn transit_square_d1_attacked_blocks_queenside_castling() {
             let board = Board::from_fen("r3k2r/8/8/8/3r4/8/8/R3K2R w KQkq - 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(!moves.contains(&Move::from_str("e1c1").unwrap()));
-            assert!(moves.contains(&Move::from_str("e1g1").unwrap()));
+            assert!(!has_uci(&moves, "e1c1"));
+            assert!(moves.contains(&mv("e1g1", Flag::KingCastle)));
         }
 
         #[test]
         fn transit_square_f1_attacked_blocks_kingside_castling() {
             let board = Board::from_fen("r3k2r/8/8/8/5r2/8/8/R3K2R w KQkq - 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(!moves.contains(&Move::from_str("e1g1").unwrap()));
-            assert!(moves.contains(&Move::from_str("e1c1").unwrap()));
+            assert!(!has_uci(&moves, "e1g1"));
+            assert!(moves.contains(&mv("e1c1", Flag::QueenCastle)));
         }
 
         #[test]
         fn pieces_between_king_and_rook_block_castling() {
             let board = Board::from_fen("r3k2r/8/8/8/8/8/8/R1B1K2R w KQkq - 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(!moves.contains(&Move::from_str("e1c1").unwrap()));
-            assert!(moves.contains(&Move::from_str("e1g1").unwrap()));
+            assert!(!has_uci(&moves, "e1c1"));
+            assert!(moves.contains(&mv("e1g1", Flag::KingCastle)));
         }
 
         #[test]
         fn enemy_attack_on_b1_allows_queenside_castling() {
             let board = Board::from_fen("r3k2r/8/8/8/1r6/8/8/R3K2R w KQkq - 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(moves.contains(&Move::from_str("e1c1").unwrap()));
-            assert!(moves.contains(&Move::from_str("e1g1").unwrap()));
+            assert!(moves.contains(&mv("e1c1", Flag::QueenCastle)));
+            assert!(moves.contains(&mv("e1g1", Flag::KingCastle)));
         }
     }
 
@@ -159,9 +178,9 @@ mod tests {
         fn piece_can_capture_checking_slider() {
             let board = Board::from_fen("8/8/8/8/4r3/8/2B5/3NK2k w - - 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(moves.contains(&Move::from_str("c2e4").unwrap()));
-            assert!(!moves.contains(&Move::from_str("c2b3").unwrap()));
-            assert!(!moves.contains(&Move::from_str("c2d3").unwrap()));
+            assert!(moves.contains(&mv("c2e4", Flag::Capture)));
+            assert!(!has_uci(&moves, "c2b3"));
+            assert!(!has_uci(&moves, "c2d3"));
         }
 
         #[test]
@@ -178,14 +197,14 @@ mod tests {
         fn double_check_disallows_capturing_checker_with_non_king() {
             let board = Board::from_fen("4r3/8/8/Q7/8/3n4/8/R3K2k w - - 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(!moves.contains(&Move::from_str("a5d3").unwrap()));
+            assert!(!has_uci(&moves, "a5d3"));
         }
 
         #[test]
         fn double_check_disallows_blocking_with_non_king() {
             let board = Board::from_fen("4r3/8/8/Q7/8/3n4/8/R3K2k w - - 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(!moves.contains(&Move::from_str("a1e1").unwrap()));
+            assert!(!has_uci(&moves, "a1e1"));
         }
     }
 
@@ -207,16 +226,16 @@ mod tests {
         fn rook_pinned_along_file_can_capture_pinner() {
             let board = Board::from_fen("4r3/8/8/8/4R3/8/8/4K2k w - - 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(moves.contains(&Move::from_str("e4e8").unwrap()));
+            assert!(moves.contains(&mv("e4e8", Flag::Capture)));
         }
 
         #[test]
         fn rook_pinned_along_file_cannot_move_laterally() {
             let board = Board::from_fen("4r3/8/8/8/4R3/8/8/4K2k w - - 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(!moves.contains(&Move::from_str("e4d4").unwrap()));
-            assert!(!moves.contains(&Move::from_str("e4c4").unwrap()));
-            assert!(!moves.contains(&Move::from_str("e4f4").unwrap()));
+            assert!(!has_uci(&moves, "e4d4"));
+            assert!(!has_uci(&moves, "e4c4"));
+            assert!(!has_uci(&moves, "e4f4"));
         }
 
         #[test]
@@ -243,15 +262,15 @@ mod tests {
         fn bishop_pinned_along_diagonal_can_capture_pinner() {
             let board = Board::from_fen("7b/8/8/8/3B4/8/8/K6k w - - 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(moves.contains(&Move::from_str("d4h8").unwrap()));
+            assert!(moves.contains(&mv("d4h8", Flag::Capture)));
         }
 
         #[test]
         fn bishop_pinned_along_diagonal_cannot_step_off_diagonal() {
             let board = Board::from_fen("7b/8/8/8/3B4/8/8/K6k w - - 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(!moves.contains(&Move::from_str("d4c5").unwrap()));
-            assert!(!moves.contains(&Move::from_str("d4e3").unwrap()));
+            assert!(!has_uci(&moves, "d4c5"));
+            assert!(!has_uci(&moves, "d4e3"));
         }
     }
 
@@ -262,21 +281,21 @@ mod tests {
         fn standard_en_passant_capture_is_generated() {
             let board = Board::from_fen("8/8/8/3Pp3/8/8/8/4K2k w - e6 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(moves.contains(&Move::from_str("d5e6").unwrap()));
+            assert!(moves.contains(&mv("d5e6", Flag::EpCapture)));
         }
 
         #[test]
         fn horizontal_pin_discovery_check_prevents_en_passant() {
             let board = Board::from_fen("8/8/8/K1Pp3r/8/8/8/7k w - d6 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(!moves.contains(&Move::from_str("c5d6").unwrap()));
+            assert!(!has_uci(&moves, "c5d6"));
         }
 
         #[test]
         fn en_passant_resolves_check_by_capturing_checker() {
             let board = Board::from_fen("8/8/3K4/3Pp3/8/8/8/7k w - e6 0 1").unwrap();
             let moves = gen_all_moves(&board);
-            assert!(moves.contains(&Move::from_str("d5e6").unwrap()));
+            assert!(moves.contains(&mv("d5e6", Flag::EpCapture)));
         }
     }
 
@@ -308,15 +327,15 @@ mod tests {
             let board = Board::from_fen("8/8/8/3p4/4P3/8/8/4K2k w - - 0 1").unwrap();
             let q_moves = gen_qsearch_moves(&board);
             assert_eq!(q_moves.len(), 1);
-            assert_eq!(q_moves[0], Move::from_str("e4d5").unwrap());
+            assert_eq!(q_moves[0], mv("e4d5", Flag::Capture));
         }
 
         #[test]
         fn filters_out_quiet_moves_when_not_in_check() {
             let board = Board::from_fen("8/8/8/3p4/4P3/8/8/4K2k w - - 0 1").unwrap();
             let q_moves = gen_qsearch_moves(&board);
-            assert!(!q_moves.contains(&Move::from_str("e4e5").unwrap()));
-            assert!(!q_moves.contains(&Move::from_str("e1e2").unwrap()));
+            assert!(!has_uci(&q_moves, "e4e5"));
+            assert!(!has_uci(&q_moves, "e1e2"));
         }
 
         #[test]
@@ -353,6 +372,15 @@ mod tests {
             )
             .unwrap();
             assert_eq!(perft(&mut board, 1), 48);
+        }
+
+        #[test]
+        fn kiwipete_depth_2_nodes() {
+            let mut board = Board::from_fen(
+                "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            )
+            .unwrap();
+            assert_eq!(perft(&mut board, 2), 2039);
         }
     }
 }
