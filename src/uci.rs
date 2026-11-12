@@ -7,7 +7,9 @@ use thiserror::Error;
 
 use crate::chess::Move;
 use crate::chess::piece::Color;
-use crate::engine::search::{SearchLimits, UciWriter, search_position, send_line};
+use crate::engine::search::{
+    SearchLimits, TranspositionTable, UciWriter, search_position, send_line,
+};
 use crate::position::board::Board;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -220,6 +222,7 @@ pub struct UciSession {
     pub stop_signal: Arc<AtomicBool>,
     pub search_thread: Option<std::thread::JoinHandle<()>>,
     pub writer: UciWriter,
+    pub tt: Arc<Mutex<TranspositionTable>>,
 }
 
 impl UciSession {
@@ -230,6 +233,9 @@ impl UciSession {
             stop_signal: Arc::new(AtomicBool::new(false)),
             search_thread: None,
             writer,
+            tt: Arc::new(Mutex::new(TranspositionTable::new(
+                EngineOptions::DEFAULT_HASH_MB,
+            ))),
         }
     }
 
@@ -244,8 +250,7 @@ impl UciSession {
         self.stop_search();
     }
 
-    /// Handles a single UCI command line. Returns true if the session should terminate (i.e.
-    /// "quit").
+    /// Handles a single UCI command line. Returns true if the session should terminate.
     pub fn handle_line(&mut self, line: &str) -> bool {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -292,11 +297,13 @@ impl UciSession {
                 {
                     self.options.hash_size_mb =
                         mb.clamp(EngineOptions::MIN_HASH_MB, EngineOptions::MAX_HASH_MB);
+                    self.tt.lock().unwrap().resize(self.options.hash_size_mb);
                 }
             }
             "ucinewgame" => {
                 self.stop_search();
                 self.board = Board::default();
+                self.tt.lock().unwrap().clear();
             }
             "position" => {
                 self.stop_search();
@@ -311,9 +318,16 @@ impl UciSession {
                 let board_clone = self.board.clone();
                 let stop_sig_clone = Arc::clone(&self.stop_signal);
                 let writer_clone = Arc::clone(&self.writer);
+                let tt_clone = Arc::clone(&self.tt);
 
                 let handle = std::thread::spawn(move || {
-                    search_position(board_clone, limits, stop_sig_clone, Some(writer_clone));
+                    search_position(
+                        board_clone,
+                        limits,
+                        stop_sig_clone,
+                        Some(writer_clone),
+                        Some(tt_clone),
+                    );
                 });
                 self.search_thread = Some(handle);
             }
