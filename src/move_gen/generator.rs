@@ -3,6 +3,8 @@ use crate::chess::piece::{Color, Kind};
 use crate::chess::{Bitboard, Flag, Move, Piece, Square};
 use crate::position::Board;
 
+const PROMO_KINDS: [Kind; 4] = [Kind::Queen, Kind::Rook, Kind::Bishop, Kind::Knight];
+
 /// Generates all valid chess moves, taking into account King safety.
 pub fn gen_all_moves(board: &Board) -> Vec<Move> {
     let mut moves = Vec::with_capacity(256);
@@ -261,9 +263,9 @@ fn gen_pawn_moves(
     let their_pieces = board.us(us.flip());
     let mut moves = Vec::new();
 
-    let (forward_shift, start_rank) = match us {
-        Color::White => (8, 1),
-        Color::Black => (-8, 6),
+    let (forward_shift, start_rank, promo_rank) = match us {
+        Color::White => (8, 1, 7),
+        Color::Black => (-8, 6, 0),
     };
 
     for from in pawns {
@@ -279,7 +281,13 @@ fn gen_pawn_moves(
         if !occupancy.contains(single_push_sq) {
             // Check if single push resolves checks or stays on pin ray
             if move_mask.contains(single_push_sq) {
-                moves.push(Move::new_with_flag(from, single_push_sq, Flag::Quiet));
+                if single_push_sq.rank() == promo_rank {
+                    for kind in PROMO_KINDS {
+                        moves.push(Move::new_promo(from, single_push_sq, kind));
+                    }
+                } else {
+                    moves.push(Move::new_with_flag(from, single_push_sq, Flag::Quiet));
+                }
             }
 
             // Double push
@@ -300,7 +308,13 @@ fn gen_pawn_moves(
         while !captures.is_empty() {
             let to = captures.lsb();
             captures.clear_bit(to);
-            moves.push(Move::new_with_flag(from, to, Flag::Capture));
+            if to.rank() == promo_rank {
+                for kind in PROMO_KINDS {
+                    moves.push(Move::new_promo_capture(from, to, kind));
+                }
+            } else {
+                moves.push(Move::new_with_flag(from, to, Flag::Capture));
+            }
         }
 
         // En passant

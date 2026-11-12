@@ -319,6 +319,46 @@ mod tests {
         }
     }
 
+    mod promotions {
+        use super::*;
+        use crate::chess::Piece;
+
+        #[test]
+        fn generates_all_four_promotion_types_for_push_and_capture() {
+            // White pawn on e7 can push to e8 or capture on d8
+            let mut board = Board::from_fen("3r4/4P3/8/8/8/8/8/k6K w - - 0 1").unwrap();
+            let moves = gen_all_moves(&board);
+
+            // 4 promotion pushes
+            assert!(moves.contains(&Move::from_str("e7e8q").unwrap()));
+            assert!(moves.contains(&Move::from_str("e7e8r").unwrap()));
+            assert!(moves.contains(&Move::from_str("e7e8b").unwrap()));
+            assert!(moves.contains(&Move::from_str("e7e8n").unwrap()));
+
+            // 4 promotion captures
+            assert!(moves.contains(&mv("e7d8q", Flag::QueenPromoCapture)));
+            assert!(moves.contains(&mv("e7d8r", Flag::RookPromoCapture)));
+            assert!(moves.contains(&mv("e7d8b", Flag::BishopPromoCapture)));
+            assert!(moves.contains(&mv("e7d8n", Flag::KnightPromoCapture)));
+
+            // Verify make & unmake move
+            let promo_q = Move::from_str("e7e8q").unwrap();
+            board.make_move(promo_q);
+            assert_eq!(
+                board.piece_at(Square::from_str("e8").unwrap()),
+                Some(Piece::WQueen)
+            );
+            assert_eq!(board.piece_at(Square::from_str("e7").unwrap()), None);
+
+            board.unmake_move(promo_q);
+            assert_eq!(
+                board.piece_at(Square::from_str("e7").unwrap()),
+                Some(Piece::WPawn)
+            );
+            assert_eq!(board.piece_at(Square::from_str("e8").unwrap()), None);
+        }
+    }
+
     mod quiescence_search {
         use super::*;
 
