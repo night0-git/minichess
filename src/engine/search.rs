@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -6,11 +7,34 @@ use crate::chess::Move;
 use crate::engine::evaluate;
 use crate::position::board::Board;
 
-// i32::MIN has an absolute value 1 greater than i32::MAX, negating it will cause an overflow.
-const NEG_INF: i32 = i32::MIN + 1;
-const POS_INF: i32 = i32::MAX;
+const NEG_INF: i32 = -32_000;
+const POS_INF: i32 = 32_000;
+pub const MATE_SCORE: i32 = 30_000;
+pub const MATE_THRESHOLD: i32 = 29_000;
 
 const CHECK_STOP_INTERVAL: u64 = 2048;
+
+#[inline(always)]
+fn score_to_tt(score: i32, ply: i32) -> i32 {
+    if score >= MATE_THRESHOLD {
+        score + ply
+    } else if score <= -MATE_THRESHOLD {
+        score - ply
+    } else {
+        score
+    }
+}
+
+#[inline(always)]
+fn score_from_tt(score: i32, ply: i32) -> i32 {
+    if score >= MATE_THRESHOLD {
+        score - ply
+    } else if score <= -MATE_THRESHOLD {
+        score + ply
+    } else {
+        score
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct SearchLimits {
@@ -139,9 +163,19 @@ impl TranspositionTable {
     pub fn extract_pv(&self, board: &Board, max_depth: usize) -> Vec<Move> {
         let mut pv = Vec::new();
         let mut current_board = board.clone();
-        let mut visited = std::collections::HashSet::new();
+        let mut visited = HashSet::new();
+        self.extend_pv(&mut current_board, &mut visited, &mut pv, max_depth);
+        pv
+    }
 
-        for _ in 0..max_depth {
+    fn extend_pv(
+        &self,
+        current_board: &mut Board,
+        visited: &mut HashSet<u64>,
+        pv: &mut Vec<Move>,
+        max_len: usize,
+    ) {
+        for _ in 0..max_len {
             let key = current_board.state.zobrist_key;
             if !visited.insert(key) {
                 break;
@@ -150,17 +184,19 @@ impl TranspositionTable {
             if let Some(entry) = self.probe(key)
                 && let Some(mv) = entry.best_move
             {
-                let legal_moves = crate::move_gen::gen_all_moves(&current_board);
+                let legal_moves = crate::move_gen::gen_all_moves(current_board);
                 if legal_moves.contains(&mv) {
                     pv.push(mv);
                     current_board.make_move(mv);
+                    if current_board.is_threefold_repetition() || current_board.is_fifty_move_draw()
+                    {
+                        break;
+                    }
                     continue;
                 }
             }
             break;
         }
-
-        pv
     }
 }
 
@@ -216,10 +252,19 @@ pub fn alpha_beta_search(
     mut alpha: i32,
     beta: i32,
     depth_left: i32,
+    ply: i32,
     ctx: &mut SearchContext,
 ) -> i32 {
     ctx.increment_nodes();
     if ctx.aborted {
+        return 0;
+    }
+
+    // Check path-dependent draws before probing the TT.
+    if ply > 0 && board.is_twofold_repetition() {
+        return 0;
+    }
+    if ply > 0 && board.is_fifty_move_draw() && !crate::move_gen::is_in_check(board) {
         return 0;
     }
 
@@ -230,28 +275,36 @@ pub fn alpha_beta_search(
     if let Some(entry) = tt_entry
         && entry.depth as i32 >= depth_left
     {
+        let tt_score = score_from_tt(entry.score, ply);
         match entry.bound {
-            Bound::Exact => return entry.score,
+            Bound::Exact => return tt_score,
             Bound::LowerBound => {
-                if entry.score >= beta {
-                    return entry.score;
+                if tt_score >= beta {
+                    return tt_score;
                 }
             }
             Bound::UpperBound => {
-                if entry.score <= alpha {
-                    return entry.score;
+                if tt_score <= alpha {
+                    return tt_score;
                 }
             }
         }
     }
 
-    if depth_left == 0 {
+    if depth_left <= 0 {
         return quiesce(board, alpha, beta, ctx);
     }
 
     let mut moves = crate::move_gen::gen_all_moves(board);
     if moves.is_empty() {
-        return NEG_INF;
+        return if crate::move_gen::is_in_check(board) {
+            -MATE_SCORE + ply
+        } else {
+            0
+        };
+    }
+    if ply > 0 && board.is_fifty_move_draw() {
+        return 0;
     }
 
     // Move ordering: prioritize TT best move to maximize beta cutoffs
@@ -267,7 +320,7 @@ pub fn alpha_beta_search(
 
     for mv in moves {
         board.make_move(mv);
-        let score = -alpha_beta_search(board, -beta, -alpha, depth_left - 1, ctx);
+        let score = -alpha_beta_search(board, -beta, -alpha, depth_left - 1, ply + 1, ctx);
         board.unmake_move(mv);
 
         if ctx.aborted {
@@ -295,8 +348,13 @@ pub fn alpha_beta_search(
             Bound::UpperBound
         };
 
-        ctx.tt
-            .store(key, depth_left.max(0) as u8, best_value, bound, best_move);
+        ctx.tt.store(
+            key,
+            depth_left.max(0) as u8,
+            score_to_tt(best_value, ply),
+            bound,
+            best_move,
+        );
     }
 
     best_value
@@ -394,14 +452,15 @@ where
 
         for &mv in &root_moves {
             board.make_move(mv);
-            let score = -alpha_beta_search(&mut board, -beta, -alpha, (depth as i32) - 1, &mut ctx);
+            let score =
+                -alpha_beta_search(&mut board, -beta, -alpha, (depth as i32) - 1, 1, &mut ctx);
             board.unmake_move(mv);
 
             if ctx.aborted {
                 break;
             }
 
-            if score > best_score_this_depth {
+            if best_move_this_depth.is_none() || score > best_score_this_depth {
                 best_score_this_depth = score;
                 best_move_this_depth = Some(mv);
             }
@@ -421,7 +480,7 @@ where
             ctx.tt.store(
                 board.state.zobrist_key,
                 depth as u8,
-                best_score_this_depth,
+                score_to_tt(best_score_this_depth, 0),
                 Bound::Exact,
                 Some(mv),
             );
@@ -433,12 +492,22 @@ where
             .checked_div(time_ms)
             .unwrap_or(ctx.nodes * 1000);
 
-        // Extract full PV via Transposition Table.
-        let mut pv = ctx.tt.extract_pv(&board, depth as usize);
-        if pv.is_empty()
-            && let Some(mv) = best_move_this_depth
-        {
+        // Seed PV with the chosen root move so pv[0] always matches bestmove,
+        // then extend via TT while stopping on threefold repetition / 50-move draw.
+        let mut pv = Vec::new();
+        if let Some(mv) = best_move_this_depth {
             pv.push(mv);
+            let mut pv_board = board.clone();
+            let mut visited = HashSet::from([pv_board.state.zobrist_key]);
+            pv_board.make_move(mv);
+            if !pv_board.is_threefold_repetition() && !pv_board.is_fifty_move_draw() {
+                ctx.tt.extend_pv(
+                    &mut pv_board,
+                    &mut visited,
+                    &mut pv,
+                    (depth as usize).saturating_sub(1),
+                );
+            }
         }
 
         on_info(SearchInfo {
@@ -454,6 +523,7 @@ where
             break;
         }
 
+        // Searching a new depth would just abort mid-search anyway.
         if let Some(allocated) = limits.time_allocated
             && (elapsed >= allocated || elapsed.as_millis() * 2 >= allocated.as_millis())
         {
@@ -545,13 +615,13 @@ mod tests {
         let mut tt = TranspositionTable::new(1);
         let mut ctx = SearchContext::new(stop_signal.clone(), None, &mut tt);
         let mut b1 = board.clone();
-        alpha_beta_search(&mut b1, NEG_INF, POS_INF, 3, &mut ctx);
+        alpha_beta_search(&mut b1, NEG_INF, POS_INF, 3, 0, &mut ctx);
         let nodes_first_pass = ctx.nodes;
 
         // Second search with populated TT
         let mut ctx2 = SearchContext::new(stop_signal, None, &mut tt);
         let mut b2 = board.clone();
-        alpha_beta_search(&mut b2, NEG_INF, POS_INF, 3, &mut ctx2);
+        alpha_beta_search(&mut b2, NEG_INF, POS_INF, 3, 0, &mut ctx2);
         let nodes_second_pass = ctx2.nodes;
 
         // The second search should immediately hit the TT and explore fewer nodes
@@ -584,5 +654,63 @@ mod tests {
         let pv = tt.extract_pv(&board, 3);
         assert!(!pv.is_empty());
         assert_eq!(pv[0], best_move.unwrap());
+    }
+
+    #[test]
+    fn forced_mate_bestmove_matches_pv_and_scores_mate() {
+        // Every legal reply (Kg8 or a2a1*) allows Rc1c8#.
+        let board = Board::from_fen("7k/8/6K1/8/8/8/p7/2R5 b - - 0 1").unwrap();
+        let stop_signal = Arc::new(AtomicBool::new(false));
+        let limits = SearchLimits {
+            max_depth: Some(4),
+            time_allocated: None,
+            infinite: false,
+        };
+        let mut infos = Vec::new();
+        let best_move = search_position(board, limits, stop_signal, None, |info| infos.push(info));
+        let chosen = best_move.expect("Expected a legal move even when getting mated");
+        let last_info = infos.last().expect("Expected search info");
+        assert_eq!(last_info.pv.first().copied(), Some(chosen));
+        assert!(
+            last_info.score <= -MATE_THRESHOLD,
+            "Expected negative mate score, got {}",
+            last_info.score
+        );
+    }
+
+    #[test]
+    fn stalemate_scores_zero() {
+        let mut board = Board::from_fen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1").unwrap();
+        let stop_signal = Arc::new(AtomicBool::new(false));
+        let mut tt = TranspositionTable::new(1);
+        let mut ctx = SearchContext::new(stop_signal, None, &mut tt);
+        let score = alpha_beta_search(&mut board, NEG_INF, POS_INF, 2, 1, &mut ctx);
+        assert_eq!(score, 0);
+    }
+
+    #[test]
+    fn pv_stops_at_threefold_repetition() {
+        // After 7 plies of knight shuffling, Black playing f6g8 creates a 3rd occurrence of startpos.
+        let mut board = Board::default();
+        for mv_str in ["g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6", "f3g1"] {
+            board
+                .try_make_move(Move::from_str(mv_str).unwrap())
+                .unwrap();
+        }
+
+        let mut tt = TranspositionTable::new(1);
+        let rep_mv = board
+            .try_make_move(Move::from_str("f6g8").unwrap())
+            .unwrap();
+        let after_rep_key = board.state.zobrist_key;
+        board.unmake_move(rep_mv);
+
+        // Seed TT with both the repeating move and a follow-up from the repeated position.
+        tt.store(board.state.zobrist_key, 4, 0, Bound::Exact, Some(rep_mv));
+        let cont_mv = Move::from_str("e2e4").unwrap();
+        tt.store(after_rep_key, 3, 0, Bound::Exact, Some(cont_mv));
+
+        let pv = tt.extract_pv(&board, 4);
+        assert_eq!(pv, vec![rep_mv]);
     }
 }

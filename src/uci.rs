@@ -7,7 +7,9 @@ use thiserror::Error;
 
 use crate::chess::Move;
 use crate::chess::piece::Color;
-use crate::engine::search::{SearchInfo, SearchLimits, TranspositionTable, search_position};
+use crate::engine::search::{
+    MATE_SCORE, MATE_THRESHOLD, SearchInfo, SearchLimits, TranspositionTable, search_position,
+};
 use crate::position::board::Board;
 
 pub type UciWriter = Arc<Mutex<dyn Write + Send>>;
@@ -26,9 +28,18 @@ fn format_info(info: &SearchInfo) -> String {
         .map(|m| m.to_string())
         .collect::<Vec<_>>()
         .join(" ");
+    let score_str = if info.score >= MATE_THRESHOLD {
+        let moves_to_mate = (MATE_SCORE - info.score + 1) / 2;
+        format!("mate {moves_to_mate}")
+    } else if info.score <= -MATE_THRESHOLD {
+        let moves_to_mate = (MATE_SCORE + info.score) / 2;
+        format!("mate -{moves_to_mate}")
+    } else {
+        format!("cp {}", info.score)
+    };
     format!(
-        "info depth {} score cp {} nodes {} nps {} time {} pv {pv_str}",
-        info.depth, info.score, info.nodes, info.nps, info.time_ms
+        "info depth {} score {score_str} nodes {} nps {} time {} pv {pv_str}",
+        info.depth, info.nodes, info.nps, info.time_ms
     )
 }
 
@@ -519,5 +530,28 @@ mod tests {
 
         let output = String::from_utf8(out_buf.lock().unwrap().clone()).unwrap();
         assert!(output.contains("bestmove "));
+    }
+
+    #[test]
+    fn formats_positive_and_negative_mate_scores() {
+        let pos_mate_1 = SearchInfo {
+            depth: 2,
+            score: MATE_SCORE - 1,
+            nodes: 10,
+            nps: 1000,
+            time_ms: 1,
+            pv: vec![],
+        };
+        assert!(format_info(&pos_mate_1).contains("score mate 1 "));
+
+        let neg_mate_1 = SearchInfo {
+            depth: 2,
+            score: -MATE_SCORE + 2,
+            nodes: 10,
+            nps: 1000,
+            time_ms: 1,
+            pv: vec![],
+        };
+        assert!(format_info(&neg_mate_1).contains("score mate -1 "));
     }
 }

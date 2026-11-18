@@ -379,6 +379,13 @@ fn gen_castling_moves(board: &Board, us: Color, king_sq: Square) -> Vec<Move> {
     moves
 }
 
+/// Returns `true` if the side to move's king is currently in check.
+pub fn is_in_check(board: &Board) -> bool {
+    let us = board.side_to_move;
+    let king_sq = board.bitboard(Piece::new(us, Kind::King)).lsb();
+    !get_attackers(board, king_sq, us.flip()).is_empty()
+}
+
 /// Get a bitboard of the pieces that are attacking the King
 fn get_attackers(board: &Board, sq: Square, attacker_col: Color) -> Bitboard {
     let mut attackers = Bitboard::new(0);

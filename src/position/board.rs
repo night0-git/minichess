@@ -70,12 +70,58 @@ pub struct Board {
 }
 
 impl Board {
+    pub const FIFTY_MOVE_RULE_HALFMOVES: u32 = 100;
+    const TWOFOLD_PRIOR_OCCURRENCES: usize = 1;
+    const THREEFOLD_PRIOR_OCCURRENCES: usize = 2;
+
     pub fn from_fen(fen: &str) -> Result<Self, fen::ParseError> {
         fen::parse(fen)
     }
 
     pub fn to_fen(&self) -> String {
         fen::generate(self)
+    }
+
+    /// Returns `true` if the halfmove clock has reached the 50-move draw limit (100 plies).
+    #[inline]
+    pub const fn is_fifty_move_draw(&self) -> bool {
+        self.state.halfmove_clock >= Self::FIFTY_MOVE_RULE_HALFMOVES
+    }
+
+    /// Returns `true` if the current position has occurred at least once before in `self.history`.
+    #[inline]
+    pub fn is_twofold_repetition(&self) -> bool {
+        self.is_repetition(Self::TWOFOLD_PRIOR_OCCURRENCES)
+    }
+
+    /// Returns `true` if the current position has occurred at least twice before in `self.history`.
+    #[inline]
+    pub fn is_threefold_repetition(&self) -> bool {
+        self.is_repetition(Self::THREEFOLD_PRIOR_OCCURRENCES)
+    }
+
+    /// Returns `true` if the current position has occurred at least `threshold`
+    /// times earlier in `self.history` (e.g. `1` for a 2-fold repetition, `2` for a 3-fold).
+    pub fn is_repetition(&self, threshold: usize) -> bool {
+        let limit = (self.state.halfmove_clock as usize).min(self.history.len());
+        if limit < 2 {
+            return false;
+        }
+
+        let key = self.state.zobrist_key;
+        let len = self.history.len();
+        let mut count = 0;
+        let mut dist = 2;
+        while dist <= limit {
+            if self.history[len - dist].zobrist_key == key {
+                count += 1;
+                if count >= threshold {
+                    return true;
+                }
+            }
+            dist += 2;
+        }
+        false
     }
 
     /// Create the intial instance of a board
@@ -679,5 +725,27 @@ mod tests {
         let mut promo_board = Board::from_fen("8/4P3/8/8/8/8/8/k6K w - - 0 1").unwrap();
         let unpromoted_mv = Move::from_str("e7e8").unwrap();
         promo_board.make_move(unpromoted_mv);
+    }
+
+    #[test]
+    fn detects_twofold_and_threefold_repetitions() {
+        let mut board = Board::default();
+        let cycle = ["g1f3", "g8f6", "f3g1", "f6g8"];
+
+        assert!(!board.is_repetition(1));
+        for mv_str in cycle {
+            board
+                .try_make_move(Move::from_str(mv_str).unwrap())
+                .unwrap();
+        }
+        assert!(board.is_repetition(1));
+        assert!(!board.is_repetition(2));
+
+        for mv_str in cycle {
+            board
+                .try_make_move(Move::from_str(mv_str).unwrap())
+                .unwrap();
+        }
+        assert!(board.is_repetition(2));
     }
 }
