@@ -1,4 +1,5 @@
 use crate::chess::piece::{Color, Piece};
+use crate::engine::pawn::{PawnTable, evaluate_pawns};
 use crate::position::board::Board;
 
 /// Middlegame piece values per piece kind.
@@ -192,8 +193,20 @@ pub const EG_PST: [[i32; 64]; 6] = [
 ];
 
 /// Evaluates the board position from the perspective of the side to move.
-/// Combines base material, piece-square tables (PSTs), and tapered evaluation.
+/// Combines base material, piece-square tables (PSTs), pawn structure, and tapered evaluation.
 pub fn evaluate(board: &Board) -> i32 {
+    let (pawn_mg, pawn_eg) = evaluate_pawns(board);
+    evaluate_with_pawn_score(board, pawn_mg, pawn_eg)
+}
+
+/// Evaluates the board position using a caller-supplied `PawnTable` to cache
+/// pawn structure scores across nodes with unchanged pawn placement.
+pub fn evaluate_with_pawn_table(board: &Board, pawn_table: &mut PawnTable) -> i32 {
+    let (pawn_mg, pawn_eg) = pawn_table.probe_or_eval(board);
+    evaluate_with_pawn_score(board, pawn_mg, pawn_eg)
+}
+
+fn evaluate_with_pawn_score(board: &Board, pawn_mg: i32, pawn_eg: i32) -> i32 {
     let mut mg_white = 0;
     let mut eg_white = 0;
     let mut mg_black = 0;
@@ -233,8 +246,8 @@ pub fn evaluate(board: &Board) -> i32 {
         }
     }
 
-    let mg_score = mg_white - mg_black;
-    let eg_score = eg_white - eg_black;
+    let mg_score = (mg_white - mg_black) + pawn_mg;
+    let eg_score = (eg_white - eg_black) + pawn_eg;
 
     // Linear interpolation between middlegame and endgame based on remaining piece material.
     let mg_phase = game_phase.min(MAX_PHASE);
@@ -304,5 +317,75 @@ mod tests {
             "White should have clear endgame advantage, got {}",
             eval
         );
+    }
+
+    /// Mirrors a board vertically and flips all piece colors and side to move.
+    fn color_flip(board: &Board) -> Board {
+        use crate::chess::Square;
+
+        let mut flipped = Board::empty();
+        for sq_idx in 0..64u8 {
+            let sq = Square::new(sq_idx);
+            if let Some(piece) = board.piece_at(sq) {
+                let mirrored_sq = Square::new(sq_idx ^ 56);
+                let flipped_piece = Piece::new(piece.color().flip(), piece.kind());
+                flipped.put_piece_no_zobrist(flipped_piece, mirrored_sq);
+            }
+        }
+        flipped.side_to_move = board.side_to_move.flip();
+        flipped.state.castling_rights = ((board.state.castling_rights & 0b0011) << 2)
+            | ((board.state.castling_rights & 0b1100) >> 2);
+        flipped.state.ep_square = board.state.ep_square.map(|sq| Square::new(sq.as_u8() ^ 56));
+        flipped.state.halfmove_clock = board.state.halfmove_clock;
+        flipped.fullmove_counter = board.fullmove_counter;
+        flipped.state.zobrist_key = flipped.compute_zobrist_key();
+        flipped.state.pawn_key = flipped.compute_pawn_key();
+        flipped
+    }
+
+    #[test]
+    fn eval_is_invariant_under_color_flip() {
+        let fens = [
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "r1bqk2r/pp1n1ppp/2pbpn2/3p4/2PP4/2N1PN2/PP3PPP/R1BQKB1R w KQkq - 0 6",
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            "4k3/1ppp4/8/2P1p3/8/3P4/8/4K3 w - - 0 1",
+            "4k3/p6p/4P3/8/8/8/8/4K3 b - - 0 1",
+            "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+        ];
+
+        for fen in fens {
+            let board = Board::from_fen(fen).unwrap();
+            let flipped = color_flip(&board);
+            assert_eq!(
+                evaluate(&board),
+                evaluate(&flipped),
+                "Color-flip symmetry failed for FEN: {fen}"
+            );
+        }
+    }
+
+    #[test]
+    fn cached_pawn_eval_matches_stateless_eval() {
+        let fens = [
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            "4k3/8/8/8/8/8/8/4K2R w - - 0 1",
+            "4k3/1ppp4/8/2P1p3/8/3P4/8/4K3 b - - 0 1",
+        ];
+
+        let mut table = PawnTable::default();
+        for fen in fens {
+            let board = Board::from_fen(fen).unwrap();
+            assert_eq!(
+                evaluate(&board),
+                evaluate_with_pawn_table(&board, &mut table)
+            );
+            // Probe a second time to verify cache hit matches too.
+            assert_eq!(
+                evaluate(&board),
+                evaluate_with_pawn_table(&board, &mut table)
+            );
+        }
     }
 }

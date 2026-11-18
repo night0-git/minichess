@@ -44,6 +44,7 @@ pub struct State {
     pub halfmove_clock: u32,
     pub captured_pcs: Option<Piece>,
     pub zobrist_key: u64,
+    pub pawn_key: u64,
 }
 
 impl State {
@@ -139,6 +140,7 @@ impl Board {
                 halfmove_clock: 0,
                 captured_pcs: None,
                 zobrist_key: 0,
+                pawn_key: 0,
             },
             history: Vec::with_capacity(256),
         }
@@ -166,6 +168,19 @@ impl Board {
         // En Passant
         if let Some(ep) = self.state.ep_square {
             key ^= ZOBRIST.en_passant[ep.file() as usize];
+        }
+
+        key
+    }
+
+    /// Compute the Zobrist hash of all White and Black pawns on the board.
+    pub fn compute_pawn_key(&self) -> u64 {
+        let mut key = 0;
+
+        for pawn in [Piece::WPawn, Piece::BPawn] {
+            for sq in self.bitboard(pawn) {
+                key ^= ZOBRIST.pieces[pawn as usize][sq.as_usize()];
+            }
         }
 
         key
@@ -451,7 +466,11 @@ impl Board {
         self.pieces[sq.as_usize()] = Some(piece);
 
         // XOR in the piece
-        self.state.zobrist_key ^= ZOBRIST.pieces[piece as usize][sq.as_usize()];
+        let piece_key = ZOBRIST.pieces[piece as usize][sq.as_usize()];
+        self.state.zobrist_key ^= piece_key;
+        if piece.kind() == Kind::Pawn {
+            self.state.pawn_key ^= piece_key;
+        }
     }
 
     #[inline(always)]
@@ -463,7 +482,11 @@ impl Board {
         self.pieces[sq.as_usize()] = None;
 
         // XOR out the piece
-        self.state.zobrist_key ^= ZOBRIST.pieces[piece as usize][sq.as_usize()];
+        let piece_key = ZOBRIST.pieces[piece as usize][sq.as_usize()];
+        self.state.zobrist_key ^= piece_key;
+        if piece.kind() == Kind::Pawn {
+            self.state.pawn_key ^= piece_key;
+        }
     }
 
     /// Places a piece on the board without updating the Zobrist hash.
@@ -747,5 +770,57 @@ mod tests {
                 .unwrap();
         }
         assert!(board.is_repetition(2));
+    }
+
+    #[test]
+    fn pawn_key_matches_recomputed_across_moves_and_unmake() {
+        // Test pawn pushes, non-pawn moves, regular capture, en passant, castling, and promotion.
+        let mut board = Board::default();
+        assert_eq!(board.state.pawn_key, board.compute_pawn_key());
+
+        // Non-pawn move keeps pawn_key identical.
+        let key_before_knight = board.state.pawn_key;
+        let knight_mv = board
+            .try_make_move(Move::from_str("g1f3").unwrap())
+            .unwrap();
+        assert_eq!(board.state.pawn_key, key_before_knight);
+        assert_eq!(board.state.pawn_key, board.compute_pawn_key());
+        board.unmake_move(knight_mv);
+        assert_eq!(board.state.pawn_key, key_before_knight);
+
+        // Sequence with double push, capture, en passant, and castling setup.
+        let mut played = Vec::new();
+        for mv_str in [
+            "e2e4", "a7a6", "e4e5", "d7d5", "e5d6", "b8c6", "g1f3", "c8e6", "f1c4", "d8d7", "e1g1",
+        ] {
+            let mv = board
+                .try_make_move(Move::from_str(mv_str).unwrap())
+                .unwrap();
+            assert_eq!(
+                board.state.pawn_key,
+                board.compute_pawn_key(),
+                "pawn_key mismatch after {mv_str}"
+            );
+            played.push(mv);
+        }
+
+        while let Some(mv) = played.pop() {
+            board.unmake_move(mv);
+            assert_eq!(board.state.pawn_key, board.compute_pawn_key());
+        }
+
+        // Promotion capture removes pawn from pawn_key.
+        let mut promo_board = Board::from_fen("3r4/4P3/8/8/8/8/8/k6K w - - 0 1").unwrap();
+        assert_eq!(promo_board.state.pawn_key, promo_board.compute_pawn_key());
+        assert_ne!(promo_board.state.pawn_key, 0);
+
+        let promo_mv = promo_board
+            .try_make_move(Move::from_str("e7d8q").unwrap())
+            .unwrap();
+        assert_eq!(promo_board.state.pawn_key, 0);
+        assert_eq!(promo_board.state.pawn_key, promo_board.compute_pawn_key());
+
+        promo_board.unmake_move(promo_mv);
+        assert_eq!(promo_board.state.pawn_key, promo_board.compute_pawn_key());
     }
 }

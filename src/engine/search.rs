@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::chess::Move;
 use crate::engine::evaluate;
+use crate::engine::pawn::PawnTable;
 use crate::position::board::Board;
 
 const NEG_INF: i32 = -32_000;
@@ -207,6 +208,7 @@ pub struct SearchContext<'a> {
     pub nodes: u64,
     pub aborted: bool,
     pub tt: &'a mut TranspositionTable,
+    pub pawn_table: PawnTable,
 }
 
 impl<'a> SearchContext<'a> {
@@ -222,6 +224,7 @@ impl<'a> SearchContext<'a> {
             nodes: 0,
             aborted: false,
             tt,
+            pawn_table: PawnTable::default(),
         }
     }
 
@@ -367,8 +370,8 @@ fn quiesce(board: &mut Board, mut alpha: i32, beta: i32, ctx: &mut SearchContext
         return 0;
     }
 
-    // The static evaluation establishes the baseline "stand pat" score
-    let stand_pat = evaluate(board);
+    // The static evaluation establishes the baseline "stand pat" score.
+    let stand_pat = evaluate::evaluate_with_pawn_table(board, &mut ctx.pawn_table);
 
     if stand_pat >= beta {
         return beta;
