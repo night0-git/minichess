@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -13,13 +12,22 @@ const POS_INF: i32 = i32::MAX;
 
 const CHECK_STOP_INTERVAL: u64 = 2048;
 
-pub type UciWriter = Arc<Mutex<dyn Write + Send>>;
-
 #[derive(Debug, Clone, Default)]
 pub struct SearchLimits {
     pub max_depth: Option<u32>,
     pub time_allocated: Option<Duration>,
     pub infinite: bool,
+}
+
+/// Telemetry produced after each completed iterative-deepening depth.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchInfo {
+    pub depth: u32,
+    pub score: i32,
+    pub nodes: u64,
+    pub nps: u64,
+    pub time_ms: u64,
+    pub pv: Vec<Move>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,17 +211,6 @@ impl<'a> SearchContext<'a> {
     }
 }
 
-pub fn send_line(output: &Option<UciWriter>, line: &str) {
-    if let Some(w) = output {
-        if let Ok(mut lock) = w.lock() {
-            let _ = writeln!(lock, "{line}");
-            let _ = lock.flush();
-        }
-    } else {
-        println!("{line}");
-    }
-}
-
 pub fn alpha_beta_search(
     board: &mut Board,
     mut alpha: i32,
@@ -305,7 +302,7 @@ pub fn alpha_beta_search(
     best_value
 }
 
-/// Quiescence search for the maximizing player
+/// Quiescence search for the maximizing player.
 fn quiesce(board: &mut Board, mut alpha: i32, beta: i32, ctx: &mut SearchContext) -> i32 {
     ctx.increment_nodes();
     if ctx.aborted {
@@ -345,17 +342,19 @@ fn quiesce(board: &mut Board, mut alpha: i32, beta: i32, ctx: &mut SearchContext
     alpha
 }
 
-/// Search the current position within given limits and output UCI info / bestmove.
-pub fn search_position(
+/// Search the current position within given limits, invoking `on_info` after each completed depth.
+pub fn search_position<F>(
     mut board: Board,
     limits: SearchLimits,
     stop_signal: Arc<AtomicBool>,
-    output: Option<UciWriter>,
     shared_tt: Option<Arc<Mutex<TranspositionTable>>>,
-) -> Option<Move> {
+    mut on_info: F,
+) -> Option<Move>
+where
+    F: FnMut(SearchInfo),
+{
     let mut root_moves = crate::move_gen::gen_all_moves(&board);
     if root_moves.is_empty() {
-        send_line(&output, "bestmove 0000");
         return None;
     }
 
@@ -435,25 +434,21 @@ pub fn search_position(
             .unwrap_or(ctx.nodes * 1000);
 
         // Extract full PV via Transposition Table.
-        let pv = ctx.tt.extract_pv(&board, depth as usize);
-        let pv_str = if pv.is_empty() {
-            best_move_this_depth
-                .map(|m| m.to_string())
-                .unwrap_or_default()
-        } else {
-            pv.iter()
-                .map(|m| m.to_string())
-                .collect::<Vec<_>>()
-                .join(" ")
-        };
+        let mut pv = ctx.tt.extract_pv(&board, depth as usize);
+        if pv.is_empty()
+            && let Some(mv) = best_move_this_depth
+        {
+            pv.push(mv);
+        }
 
-        send_line(
-            &output,
-            &format!(
-                "info depth {depth} score cp {best_score_this_depth} nodes {} nps {nps} time {time_ms} pv {pv_str}",
-                ctx.nodes
-            ),
-        );
+        on_info(SearchInfo {
+            depth,
+            score: best_score_this_depth,
+            nodes: ctx.nodes,
+            nps,
+            time_ms,
+            pv,
+        });
 
         if limits.max_depth.is_some_and(|md| depth >= md) {
             break;
@@ -466,14 +461,7 @@ pub fn search_position(
         }
     }
 
-    let chosen_move = last_completed_best_move.or_else(|| root_moves.first().copied());
-    if let Some(mv) = chosen_move {
-        send_line(&output, &format!("bestmove {mv}"));
-        Some(mv)
-    } else {
-        send_line(&output, "bestmove 0000");
-        None
-    }
+    last_completed_best_move.or_else(|| root_moves.first().copied())
 }
 
 #[cfg(test)]
@@ -490,13 +478,13 @@ mod tests {
             time_allocated: None,
             infinite: false,
         };
-        let output_buf = Arc::new(Mutex::new(Vec::new()));
-        let best_move = search_position(board, limits, stop_signal, Some(output_buf.clone()), None);
+        let mut infos = Vec::new();
+        let best_move = search_position(board, limits, stop_signal, None, |info| infos.push(info));
         assert!(best_move.is_some());
-        let output = String::from_utf8(output_buf.lock().unwrap().clone()).unwrap();
-        assert!(output.contains("info depth 1"));
-        assert!(output.contains("info depth 2"));
-        assert!(output.contains("bestmove "));
+        assert_eq!(infos.len(), 2);
+        assert_eq!(infos[0].depth, 1);
+        assert_eq!(infos[1].depth, 2);
+        assert!(!infos[1].pv.is_empty());
     }
 
     #[test]
@@ -583,13 +571,12 @@ mod tests {
             infinite: false,
         };
         let shared_tt = Arc::new(Mutex::new(TranspositionTable::new(1)));
-        let output_buf = Arc::new(Mutex::new(Vec::new()));
         let best_move = search_position(
             board.clone(),
             limits,
             stop_signal,
-            Some(output_buf.clone()),
             Some(shared_tt.clone()),
+            |_| {},
         );
         assert!(best_move.is_some());
 

@@ -7,10 +7,30 @@ use thiserror::Error;
 
 use crate::chess::Move;
 use crate::chess::piece::Color;
-use crate::engine::search::{
-    SearchLimits, TranspositionTable, UciWriter, search_position, send_line,
-};
+use crate::engine::search::{SearchInfo, SearchLimits, TranspositionTable, search_position};
 use crate::position::board::Board;
+
+pub type UciWriter = Arc<Mutex<dyn Write + Send>>;
+
+fn send_line(writer: &UciWriter, line: &str) {
+    if let Ok(mut lock) = writer.lock() {
+        let _ = writeln!(lock, "{line}");
+        let _ = lock.flush();
+    }
+}
+
+fn format_info(info: &SearchInfo) -> String {
+    let pv_str = info
+        .pv
+        .iter()
+        .map(|m| m.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "info depth {} score cp {} nodes {} nps {} time {} pv {pv_str}",
+        info.depth, info.score, info.nodes, info.nps, info.time_ms
+    )
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum Error {
@@ -47,7 +67,7 @@ impl Default for EngineOptions {
     }
 }
 
-/// Parse a `setoption name <id> [value <x>]` command into (name, optional value)
+/// Parse a `setoption name <id> [value <x>]` command into (name, optional value).
 pub fn parse_setoption(line: &str) -> Option<(String, Option<String>)> {
     let tokens: Vec<&str> = line.split_whitespace().collect();
     if tokens.is_empty() || tokens[0] != "setoption" {
@@ -69,7 +89,7 @@ pub fn parse_setoption(line: &str) -> Option<(String, Option<String>)> {
     }
 }
 
-/// Parse a `position [startpos | fen <fen>] [moves <m1> ...]` command into a `Board`
+/// Parse a `position [startpos | fen <fen>] [moves <m1> ...]` command into a `Board`.
 pub fn parse_position(line: &str) -> Result<Board, Error> {
     let tokens: Vec<&str> = line.split_whitespace().collect();
     if tokens.is_empty() || tokens[0] != "position" {
@@ -117,14 +137,14 @@ pub fn parse_position(line: &str) -> Result<Board, Error> {
     Ok(board)
 }
 
-/// Time management constants for search allocation
+/// Time management constants for search allocation.
 const TIME_DIVISOR: u64 = 20;
 const INC_DIVISOR: u64 = 2;
 const MOVE_OVERHEAD_MS: u64 = 50;
 const MOVETIME_OVERHEAD_MS: u64 = 5;
 const DEFAULT_MAX_DEPTH: u32 = 6;
 
-/// Parse a `go` command with parameters into `SearchLimits`
+/// Parse a `go` command with parameters into `SearchLimits`.
 pub fn parse_go(line: &str, side_to_move: Color) -> SearchLimits {
     let parts: Vec<&str> = line.split_whitespace().collect();
     let mut depth = None;
@@ -267,16 +287,10 @@ impl UciSession {
         let first_word = trimmed.split_whitespace().next().unwrap_or("");
         match first_word {
             "uci" => {
+                send_line(&self.writer, &format!("id name {}", self.options.name));
+                send_line(&self.writer, &format!("id author {}", self.options.author));
                 send_line(
-                    &Some(Arc::clone(&self.writer)),
-                    &format!("id name {}", self.options.name),
-                );
-                send_line(
-                    &Some(Arc::clone(&self.writer)),
-                    &format!("id author {}", self.options.author),
-                );
-                send_line(
-                    &Some(Arc::clone(&self.writer)),
+                    &self.writer,
                     &format!(
                         "option name Hash type spin default {} min {} max {}",
                         EngineOptions::DEFAULT_HASH_MB,
@@ -284,10 +298,10 @@ impl UciSession {
                         EngineOptions::MAX_HASH_MB
                     ),
                 );
-                send_line(&Some(Arc::clone(&self.writer)), "uciok");
+                send_line(&self.writer, "uciok");
             }
             "isready" => {
-                send_line(&Some(Arc::clone(&self.writer)), "readyok");
+                send_line(&self.writer, "readyok");
             }
             "setoption" => {
                 if let Some((name, val)) = parse_setoption(trimmed)
@@ -321,13 +335,19 @@ impl UciSession {
                 let tt_clone = Arc::clone(&self.tt);
 
                 let handle = std::thread::spawn(move || {
-                    search_position(
+                    let best_move = search_position(
                         board_clone,
                         limits,
                         stop_sig_clone,
-                        Some(writer_clone),
                         Some(tt_clone),
+                        |info| {
+                            send_line(&writer_clone, &format_info(&info));
+                        },
                     );
+                    match best_move {
+                        Some(mv) => send_line(&writer_clone, &format!("bestmove {mv}")),
+                        None => send_line(&writer_clone, "bestmove 0000"),
+                    }
                 });
                 self.search_thread = Some(handle);
             }
