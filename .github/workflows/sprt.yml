@@ -37,12 +37,14 @@ jobs:
           rm -f uho_2024.7z
 
       - name: Run SPRT
+        timeout-minutes: 340
         run: |
           ./scripts/bench_sprt.sh \
             -y \
             -r "${{ inputs.base_ref }}" \
             -t "${{ inputs.tc }}" \
-            -n 2500 \
+            -n 100000 \
+            -c "$(nproc)" \
             --fastchess /tmp/fastchess/fastchess
 
       - name: Upload benchmark results
