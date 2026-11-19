@@ -1,0 +1,54 @@
+name: Fastchess SPRT
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: 'Baseline branch, tag, or commit SHA'
+        required: true
+        type: string
+        default: 'main'
+      tc:
+        description: 'Time control (e.g., 8+0.08)'
+        required: true
+        type: string
+        default: '8+0.08'
+
+jobs:
+  sprt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build fastchess
+        run: |
+          git clone --depth 1 https://github.com/Disservin/fastchess.git /tmp/fastchess
+          make -C /tmp/fastchess -j"$(nproc)"
+
+      - name: Prepare opening books
+        run: |
+          curl -fsSL -o uho_2024.7z https://www.sp-cc.de/files/uho_2024.7z
+          7z x -y -obooks uho_2024.7z
+          rm -f uho_2024.7z
+
+      - name: Run SPRT
+        run: |
+          ./scripts/bench_sprt.sh \
+            -y \
+            -r "${{ inputs.base_ref }}" \
+            -t "${{ inputs.tc }}" \
+            -n 2500 \
+            --fastchess /tmp/fastchess/fastchess
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sprt-${{ github.run_number }}
+          path: benchmarks/
+          if-no-files-found: ignore
