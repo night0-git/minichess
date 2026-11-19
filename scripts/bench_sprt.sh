@@ -27,6 +27,7 @@ BASE_REF=""
 BASE_BIN=""
 BOOK=""
 FASTCHESS_BIN="${FASTCHESS:-}"
+OUT_DIR="$ROOT_DIR/benchmarks"
 AUTO_CONFIRM=false
 
 usage() {
@@ -48,6 +49,8 @@ Options:
       --elo0 <VAL>          SPRT lower bound (default: 0).
       --elo1 <VAL>          SPRT upper bound (default: 5).
       --fixed               Run fixed rounds without SPRT.
+  -o, --out-dir <DIR>       Directory to save timestamped .log and .pgn results
+                            (default: benchmarks/).
   -y, --yes                 Skip confirmation prompt and start immediately.
       --fastchess <PATH>    Path to fastchess binary.
   -h, --help                Show this help message.
@@ -98,6 +101,10 @@ while [[ $# -gt 0 ]]; do
         --fixed)
             USE_SPRT=false
             shift
+            ;;
+        -o|--out-dir)
+            OUT_DIR="$2"
+            shift 2
             ;;
         -y|--yes)
             AUTO_CONFIRM=true
@@ -201,6 +208,7 @@ fi
 
 # Resolve baseline details
 if [[ -n "$BASE_BIN" ]]; then
+    BASE_TAG="external"
     BASE_INFO="Pre-compiled binary: $BASE_BIN"
     BASE_DETAIL="N/A (external binary provided)"
 else
@@ -213,39 +221,61 @@ else
     fi
 
     if ! git rev-parse --verify "$BASE_REF" >/dev/null 2>&1; then
-        echo "Error: Git reference for baseline '$BASE_REF' could not be resolved." >&2
-        exit 1
+        if git rev-parse --verify "origin/$BASE_REF" >/dev/null 2>&1; then
+            BASE_REF="origin/$BASE_REF"
+        else
+            echo "Error: Git reference for baseline '$BASE_REF' could not be resolved." >&2
+            exit 1
+        fi
     fi
 
     BASE_HASH="$(git rev-parse --short "$BASE_REF")"
+    BASE_TAG="$BASE_HASH"
     BASE_MSG="$(git log -1 --pretty=format:"%s" "$BASE_REF")"
     BASE_INFO="$BASE_REF ($BASE_HASH)"
     BASE_DETAIL="$BASE_MSG"
 fi
 
-echo ""
-echo "================================================================================"
-echo " [Candidate]"
-echo "   Ref        : $CAND_BRANCH ($CAND_HASH)"
-echo "   Commit     : $CAND_MSG"
-echo "   Status     : $CAND_STATUS"
-echo ""
-echo " [Baseline]"
-echo "   Ref        : $BASE_INFO"
-echo "   Commit     : $BASE_DETAIL"
-echo ""
-echo " [Match Settings]"
-echo "   Opening Book: $BOOK_REL ($BOOK_LINES positions, format: $BOOK_FORMAT)"
-echo "   Time Control: $TC"
-echo "   CPU Threads : $CONCURRENCY worker threads ($TOTAL_CPUS total)"
-if [[ "$USE_SPRT" == "true" ]]; then
-    echo "   Evaluation  : SPRT [elo0=$ELO0, elo1=$ELO1, alpha=0.05, beta=0.05] (max $ROUNDS rounds)"
-else
-    echo "   Evaluation  : Fixed match ($ROUNDS rounds = $((ROUNDS * 2)) games)"
-fi
-echo "   Fastchess   : $FASTCHESS_BIN"
-echo "================================================================================"
-echo ""
+# Prepare unique incremental output filenames
+RUN_BASE="$(date -u +%Y%m%d_%H%M%S)_${CAND_HASH}_vs_${BASE_TAG}"
+RUN_ID="$RUN_BASE"
+SUFFIX=2
+while [[ -e "$OUT_DIR/${RUN_ID}.pgn" || -e "$OUT_DIR/${RUN_ID}.log" ]]; do
+    RUN_ID="${RUN_BASE}_${SUFFIX}"
+    SUFFIX=$((SUFFIX + 1))
+done
+PGN_OUT="$OUT_DIR/${RUN_ID}.pgn"
+LOG_OUT="$OUT_DIR/${RUN_ID}.log"
+OUT_REL="${OUT_DIR#$ROOT_DIR/}"
+
+print_summary() {
+    echo ""
+    echo "================================================================================"
+    echo " [Candidate]"
+    echo "   Ref        : $CAND_BRANCH ($CAND_HASH)"
+    echo "   Commit     : $CAND_MSG"
+    echo "   Status     : $CAND_STATUS"
+    echo ""
+    echo " [Baseline]"
+    echo "   Ref        : $BASE_INFO"
+    echo "   Commit     : $BASE_DETAIL"
+    echo ""
+    echo " [Match Settings]"
+    echo "   Opening Book: $BOOK_REL ($BOOK_LINES positions, format: $BOOK_FORMAT)"
+    echo "   Time Control: $TC"
+    echo "   CPU Threads : $CONCURRENCY worker threads ($TOTAL_CPUS total)"
+    if [[ "$USE_SPRT" == "true" ]]; then
+        echo "   Evaluation  : SPRT [elo0=$ELO0, elo1=$ELO1, alpha=0.05, beta=0.05] (max $ROUNDS rounds)"
+    else
+        echo "   Evaluation  : Fixed match ($ROUNDS rounds = $((ROUNDS * 2)) games)"
+    fi
+    echo "   Fastchess   : $FASTCHESS_BIN"
+    echo "   Output      : $OUT_REL/${RUN_ID}.{log,pgn}"
+    echo "================================================================================"
+    echo ""
+}
+
+print_summary
 
 # Confirm before running
 if [[ "$AUTO_CONFIRM" != "true" ]]; then
@@ -298,9 +328,12 @@ if [[ "$USE_SPRT" == "true" ]]; then
     EXTRA_ARGS+=("-sprt" "elo0=$ELO0" "elo1=$ELO1" "alpha=0.05" "beta=0.05")
 fi
 
+mkdir -p "$OUT_DIR"
+print_summary > "$LOG_OUT"
+
 echo ""
 echo "==> Launching fastchess match..."
-exec "$FASTCHESS_BIN" \
+"$FASTCHESS_BIN" \
   -engine cmd="$CANDIDATE_BIN" name="Candidate" \
   -engine cmd="$BASE_BIN" name="Baseline" \
   -each tc="$TC" \
@@ -310,4 +343,5 @@ exec "$FASTCHESS_BIN" \
   -openings file="$BOOK" format="$BOOK_FORMAT" order=random \
   -draw movenumber=40 movecount=8 score=10 \
   -resign movecount=4 score=800 \
-  "${EXTRA_ARGS[@]}"
+  -pgnout file="$PGN_OUT" \
+  "${EXTRA_ARGS[@]}" | tee -a "$LOG_OUT"
