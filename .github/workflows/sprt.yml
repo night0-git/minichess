@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       base_ref:
-        description: 'Baseline branch, tag, or commit SHA'
-        required: true
+        description: 'Baseline ref (empty = HEAD~1 on main, main on other branches)'
+        required: false
         type: string
-        default: 'main'
+        default: ''
       tc:
         description: 'Time control (e.g., 8+0.08)'
         required: true
