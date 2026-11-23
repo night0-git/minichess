@@ -301,6 +301,10 @@ pub fn alpha_beta_search(
         return 0;
     }
 
+    if board.is_insufficient_material() {
+        return 0;
+    }
+
     // Check path-dependent draws before probing the TT.
     if ply > 0 && board.is_twofold_repetition() {
         return 0;
@@ -408,8 +412,12 @@ fn quiesce(board: &mut Board, mut alpha: i32, beta: i32, ctx: &mut SearchContext
         return 0;
     }
 
+    if board.is_insufficient_material() {
+        return 0;
+    }
+
     // The static evaluation establishes the baseline "stand pat" score.
-    let stand_pat = evaluate::evaluate_with_pawn_table(board, &mut ctx.pawn_table);
+    let stand_pat = evaluate::evaluate_with_pawn_table_unchecked(board, &mut ctx.pawn_table);
 
     if stand_pat >= beta {
         return beta;
@@ -753,5 +761,37 @@ mod tests {
 
         let pv = tt.extract_pv(&board, 4);
         assert_eq!(pv, vec![rep_mv]);
+    }
+
+    #[test]
+    fn insufficient_material_scores_zero() {
+        let mut tt = TranspositionTable::new(1);
+
+        for fen in [
+            "4k3/8/8/8/8/8/8/4K3 w - - 0 1",
+            "4k3/8/8/1B6/8/8/8/4K3 b - - 0 1", // K+B vs K even while in check
+        ] {
+            let mut board = Board::from_fen(fen).unwrap();
+            let mut ctx = SearchContext::new(None, None, &mut tt);
+            let score = alpha_beta_search(&mut board, NEG_INF, POS_INF, 3, 1, &mut ctx);
+            assert_eq!(score, 0, "Expected 0 search score for {fen}");
+        }
+    }
+
+    #[test]
+    fn search_captures_into_insufficient_material_to_draw() {
+        let board = Board::from_fen("q3k3/8/1N6/2K5/8/8/8/8 w - - 0 1").unwrap();
+        let limits = SearchLimits::depth(2);
+        let mut tt = TranspositionTable::new(1);
+        let mut infos = Vec::new();
+        let best_move =
+            iterative_deepening(board, limits, None, &mut tt, |info| infos.push(info)).unwrap();
+        assert_eq!(
+            best_move,
+            Move::from_str("b6a8")
+                .unwrap()
+                .with_flag(crate::chess::Flag::Capture)
+        );
+        assert_eq!(infos.last().unwrap().score, 0);
     }
 }

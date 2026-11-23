@@ -195,6 +195,9 @@ pub const EG_PST: [[i32; 64]; 6] = [
 /// Evaluates the board position from the perspective of the side to move.
 /// Combines base material, piece-square tables (PSTs), pawn structure, and tapered evaluation.
 pub fn evaluate(board: &Board) -> i32 {
+    if board.is_insufficient_material() {
+        return 0;
+    }
     let (pawn_mg, pawn_eg) = evaluate_pawns(board);
     evaluate_with_pawn_score(board, pawn_mg, pawn_eg)
 }
@@ -202,6 +205,14 @@ pub fn evaluate(board: &Board) -> i32 {
 /// Evaluates the board position using a caller-supplied `PawnTable` to cache
 /// pawn structure scores across nodes with unchanged pawn placement.
 pub fn evaluate_with_pawn_table(board: &Board, pawn_table: &mut PawnTable) -> i32 {
+    if board.is_insufficient_material() {
+        return 0;
+    }
+    evaluate_with_pawn_table_unchecked(board, pawn_table)
+}
+
+/// Evaluates the board position using `pawn_table` without re-checking insufficient material.
+pub(crate) fn evaluate_with_pawn_table_unchecked(board: &Board, pawn_table: &mut PawnTable) -> i32 {
     let (pawn_mg, pawn_eg) = pawn_table.probe_or_eval(board);
     evaluate_with_pawn_score(board, pawn_mg, pawn_eg)
 }
@@ -385,6 +396,26 @@ mod tests {
             assert_eq!(
                 evaluate(&board),
                 evaluate_with_pawn_table(&board, &mut table)
+            );
+        }
+    }
+
+    #[test]
+    fn insufficient_material_evaluates_to_zero() {
+        let fens = [
+            "4k3/8/8/8/8/8/8/4K3 w - - 0 1",
+            "4k3/8/8/8/8/8/8/4K1N1 w - - 0 1",
+            "4k3/8/8/8/8/8/8/4KB2 w - - 0 1",
+            "2b1k3/8/8/8/8/8/8/4KB2 w - - 0 1",
+        ];
+        let mut table = PawnTable::default();
+        for fen in fens {
+            let board = Board::from_fen(fen).unwrap();
+            assert_eq!(evaluate(&board), 0, "Expected 0 eval for {fen}");
+            assert_eq!(
+                evaluate_with_pawn_table(&board, &mut table),
+                0,
+                "Expected 0 cached eval for {fen}"
             );
         }
     }

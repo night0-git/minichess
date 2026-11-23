@@ -89,6 +89,34 @@ impl Board {
         self.state.halfmove_clock >= Self::FIFTY_MOVE_RULE_HALFMOVES
     }
 
+    /// Returns `true` if neither side has sufficient material to deliver checkmate.
+    #[inline]
+    pub const fn is_insufficient_material(&self) -> bool {
+        let heavy_or_pawns = self.bboards[Piece::WPawn as usize].as_u64()
+            | self.bboards[Piece::BPawn as usize].as_u64()
+            | self.bboards[Piece::WRook as usize].as_u64()
+            | self.bboards[Piece::BRook as usize].as_u64()
+            | self.bboards[Piece::WQueen as usize].as_u64()
+            | self.bboards[Piece::BQueen as usize].as_u64();
+
+        if heavy_or_pawns != 0 {
+            return false;
+        }
+
+        let knights = self.bboards[Piece::WKnight as usize].as_u64()
+            | self.bboards[Piece::BKnight as usize].as_u64();
+        let bishops = self.bboards[Piece::WBishop as usize].as_u64()
+            | self.bboards[Piece::BBishop as usize].as_u64();
+
+        if knights == 0 {
+            // K vs K, K+B vs K, or bishops on a single square color cannot checkmate.
+            (bishops & Bitboard::LIGHT_SQRS) == 0 || (bishops & Bitboard::DARK_SQRS) == 0
+        } else {
+            // Only K+N vs K is insufficient; K+N+N, K+N vs K+N, and K+B vs K+N can helpmate.
+            bishops == 0 && knights.count_ones() <= 1
+        }
+    }
+
     /// Returns `true` if the current position has occurred at least once before in `self.history`.
     #[inline]
     pub fn is_twofold_repetition(&self) -> bool {
@@ -822,5 +850,46 @@ mod tests {
 
         promo_board.unmake_move(promo_mv);
         assert_eq!(promo_board.state.pawn_key, promo_board.compute_pawn_key());
+    }
+
+    #[test]
+    fn detects_insufficient_material() {
+        let insufficient_fens = [
+            "4k3/8/8/8/8/8/8/4K3 w - - 0 1",     // K vs K
+            "4k3/8/8/8/8/8/8/4K1N1 w - - 0 1",   // K+N vs K
+            "4k1n1/8/8/8/8/8/8/4K3 w - - 0 1",   // K vs K+N
+            "4k3/8/8/8/8/8/8/4KB2 w - - 0 1",    // K+B vs K (light bishop)
+            "4k3/8/8/8/8/8/8/2B1K3 w - - 0 1",   // K+B vs K (dark bishop)
+            "2b1k3/8/8/8/8/8/8/4KB2 w - - 0 1",  // K+B vs K+B (both light)
+            "4kb2/8/8/8/8/8/8/2B1K3 w - - 0 1",  // K+B vs K+B (both dark)
+            "4k3/8/8/8/5B2/8/8/2B1K3 w - - 0 1", // K+B+B vs K (same color)
+        ];
+        for fen in insufficient_fens {
+            let board = Board::from_fen(fen).unwrap();
+            assert!(
+                board.is_insufficient_material(),
+                "Expected insufficient material for {fen}"
+            );
+        }
+
+        let sufficient_fens = [
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1",   // K+P vs K
+            "4k3/8/8/8/8/8/8/4K2R w - - 0 1",    // K+R vs K
+            "4k3/8/8/8/8/8/8/4K2Q w - - 0 1",    // K+Q vs K
+            "2b1k3/8/8/8/8/8/8/2B1K3 w - - 0 1", // K+B vs K+B (opposite colors)
+            "4k3/8/8/8/8/8/8/2B1KB2 w - - 0 1",  // K+B+B vs K (bishop pair)
+            "4k3/8/8/8/8/8/8/1N2K1N1 w - - 0 1", // K+N+N vs K
+            "4k1n1/8/8/8/8/8/8/4K1N1 w - - 0 1", // K+N vs K+N
+            "4k3/8/8/8/8/8/8/4KBN1 w - - 0 1",   // K+B+N vs K
+            "4kb2/8/8/8/8/8/8/4K1N1 w - - 0 1",  // K+N vs K+B
+        ];
+        for fen in sufficient_fens {
+            let board = Board::from_fen(fen).unwrap();
+            assert!(
+                !board.is_insufficient_material(),
+                "Expected sufficient material for {fen}"
+            );
+        }
     }
 }
