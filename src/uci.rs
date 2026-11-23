@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::chess::Move;
 use crate::chess::piece::Color;
 use crate::engine::search::{
-    MATE_SCORE, MATE_THRESHOLD, SearchInfo, SearchLimits, TranspositionTable, search_position,
+    MATE_SCORE, MATE_THRESHOLD, SearchInfo, SearchLimits, TranspositionTable, iterative_deepening,
 };
 use crate::position::board::Board;
 
@@ -376,6 +376,30 @@ impl UciSession {
 
         false
     }
+}
+
+/// Asynchronous/UCI search entry point with external stop signal, shared TT, and depth callbacks.
+pub fn search_position<F>(
+    board: Board,
+    limits: SearchLimits,
+    stop_signal: Arc<AtomicBool>,
+    shared_tt: Option<Arc<Mutex<TranspositionTable>>>,
+    on_info: F,
+) -> Option<Move>
+where
+    F: FnMut(SearchInfo),
+{
+    let mut local_tt;
+    let mut tt_guard;
+    let tt: &mut TranspositionTable = if let Some(shared) = &shared_tt {
+        tt_guard = shared.lock().unwrap();
+        &mut tt_guard
+    } else {
+        local_tt = TranspositionTable::new(16);
+        &mut local_tt
+    };
+
+    iterative_deepening(board, limits, Some(stop_signal), tt, on_info).ok()
 }
 
 /// Run the UCI loop with custom reader and writer.

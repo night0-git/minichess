@@ -1,12 +1,28 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use thiserror::Error;
 
 use crate::chess::Move;
+use crate::chess::piece::{Color, Kind, Piece};
 use crate::engine::evaluate;
 use crate::engine::pawn::PawnTable;
 use crate::position::board::Board;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum Error {
+    #[error("missing {0:?} king on board")]
+    MissingKing(Color),
+    #[error("no legal moves available")]
+    NoLegalMoves,
+    #[error("search depth must be at least 1")]
+    ZeroDepth,
+    #[error("search time limit must be greater than zero")]
+    ZeroTimeLimit,
+    #[error("infinite search requires a stop signal; use search_position")]
+    InfiniteSearch,
+}
 
 const NEG_INF: i32 = -32_000;
 const POS_INF: i32 = 32_000;
@@ -42,6 +58,24 @@ pub struct SearchLimits {
     pub max_depth: Option<u32>,
     pub time_allocated: Option<Duration>,
     pub infinite: bool,
+}
+
+impl SearchLimits {
+    /// Search up to a fixed depth in plies.
+    pub fn depth(max_depth: u32) -> Self {
+        Self {
+            max_depth: Some(max_depth),
+            ..Default::default()
+        }
+    }
+
+    /// Search for at most `duration`.
+    pub fn time(duration: Duration) -> Self {
+        Self {
+            time_allocated: Some(duration),
+            ..Default::default()
+        }
+    }
 }
 
 /// Telemetry produced after each completed iterative-deepening depth.
@@ -202,7 +236,7 @@ impl TranspositionTable {
 }
 
 pub struct SearchContext<'a> {
-    pub stop_signal: Arc<AtomicBool>,
+    pub stop_signal: Option<Arc<AtomicBool>>,
     pub start_time: Instant,
     pub max_time: Option<Duration>,
     pub nodes: u64,
@@ -213,7 +247,7 @@ pub struct SearchContext<'a> {
 
 impl<'a> SearchContext<'a> {
     pub fn new(
-        stop_signal: Arc<AtomicBool>,
+        stop_signal: Option<Arc<AtomicBool>>,
         max_time: Option<Duration>,
         tt: &'a mut TranspositionTable,
     ) -> Self {
@@ -238,7 +272,11 @@ impl<'a> SearchContext<'a> {
     }
 
     pub fn check_stop(&mut self) {
-        if self.stop_signal.load(Ordering::Relaxed) {
+        if self
+            .stop_signal
+            .as_ref()
+            .is_some_and(|s| s.load(Ordering::Relaxed))
+        {
             self.aborted = true;
             return;
         }
@@ -403,36 +441,59 @@ fn quiesce(board: &mut Board, mut alpha: i32, beta: i32, ctx: &mut SearchContext
     alpha
 }
 
-/// Search the current position within given limits, invoking `on_info` after each completed depth.
-pub fn search_position<F>(
+/// Simple one-shot search returning the best legal move for `board` under `limits`.
+pub fn search(board: &Board, limits: SearchLimits) -> Result<Move, Error> {
+    let mut tt = TranspositionTable::new(16);
+    search_with_tt(board, limits, &mut tt)
+}
+
+/// Searches `board` under `limits`, reusing a caller-owned `TranspositionTable` across moves.
+pub fn search_with_tt(
+    board: &Board,
+    limits: SearchLimits,
+    tt: &mut TranspositionTable,
+) -> Result<Move, Error> {
+    iterative_deepening(board.clone(), limits, None, tt, |_| {})
+}
+
+/// Lowest level call for best move searching. It is used by the UCI module which needs to update
+/// search progress on metadata change (the `info` line).
+pub(crate) fn iterative_deepening<F>(
     mut board: Board,
     limits: SearchLimits,
-    stop_signal: Arc<AtomicBool>,
-    shared_tt: Option<Arc<Mutex<TranspositionTable>>>,
+    stop_signal: Option<Arc<AtomicBool>>,
+    tt: &mut TranspositionTable,
     mut on_info: F,
-) -> Option<Move>
+) -> Result<Move, Error>
 where
     F: FnMut(SearchInfo),
 {
-    let mut root_moves = crate::move_gen::gen_all_moves(&board);
-    if root_moves.is_empty() {
-        return None;
+    if limits.infinite && stop_signal.is_none() {
+        return Err(Error::InfiniteSearch);
+    }
+    let max_depth = match limits.max_depth {
+        Some(0) => return Err(Error::ZeroDepth),
+        Some(d) => d,
+        None => 64,
+    };
+    if limits.time_allocated.is_some_and(|d| d.is_zero()) {
+        return Err(Error::ZeroTimeLimit);
+    }
+    if board
+        .bitboard(Piece::new(board.side_to_move, Kind::King))
+        .is_empty()
+    {
+        return Err(Error::MissingKing(board.side_to_move));
     }
 
-    let mut local_tt;
-    let mut tt_guard;
-    let tt: &mut TranspositionTable = if let Some(shared) = &shared_tt {
-        tt_guard = shared.lock().unwrap();
-        &mut tt_guard
-    } else {
-        local_tt = TranspositionTable::new(16);
-        &mut local_tt
-    };
+    let mut root_moves = crate::move_gen::gen_all_moves(&board);
+    if root_moves.is_empty() {
+        return Err(Error::NoLegalMoves);
+    }
 
     tt.new_search();
 
     let mut ctx = SearchContext::new(stop_signal, limits.time_allocated, tt);
-    let max_depth = limits.max_depth.unwrap_or(64);
 
     let mut last_completed_best_move: Option<Move> = None;
 
@@ -534,7 +595,7 @@ where
         }
     }
 
-    last_completed_best_move.or_else(|| root_moves.first().copied())
+    Ok(last_completed_best_move.unwrap_or(root_moves[0]))
 }
 
 #[cfg(test)]
@@ -545,15 +606,11 @@ mod tests {
     #[test]
     fn search_completes_iterative_deepening() {
         let board = Board::default();
-        let stop_signal = Arc::new(AtomicBool::new(false));
-        let limits = SearchLimits {
-            max_depth: Some(2),
-            time_allocated: None,
-            infinite: false,
-        };
+        let limits = SearchLimits::depth(2);
+        let mut tt = TranspositionTable::new(1);
         let mut infos = Vec::new();
-        let best_move = search_position(board, limits, stop_signal, None, |info| infos.push(info));
-        assert!(best_move.is_some());
+        let best_move = iterative_deepening(board, limits, None, &mut tt, |info| infos.push(info));
+        assert!(best_move.is_ok());
         assert_eq!(infos.len(), 2);
         assert_eq!(infos[0].depth, 1);
         assert_eq!(infos[1].depth, 2);
@@ -612,17 +669,16 @@ mod tests {
     #[test]
     fn tt_reduces_search_node_count() {
         let board = Board::default();
-        let stop_signal = Arc::new(AtomicBool::new(false));
 
         // First search without shared TT (cold search)
         let mut tt = TranspositionTable::new(1);
-        let mut ctx = SearchContext::new(stop_signal.clone(), None, &mut tt);
+        let mut ctx = SearchContext::new(None, None, &mut tt);
         let mut b1 = board.clone();
         alpha_beta_search(&mut b1, NEG_INF, POS_INF, 3, 0, &mut ctx);
         let nodes_first_pass = ctx.nodes;
 
         // Second search with populated TT
-        let mut ctx2 = SearchContext::new(stop_signal, None, &mut tt);
+        let mut ctx2 = SearchContext::new(None, None, &mut tt);
         let mut b2 = board.clone();
         alpha_beta_search(&mut b2, NEG_INF, POS_INF, 3, 0, &mut ctx2);
         let nodes_second_pass = ctx2.nodes;
@@ -637,41 +693,24 @@ mod tests {
     #[test]
     fn tt_extracts_pv() {
         let board = Board::default();
-        let stop_signal = Arc::new(AtomicBool::new(false));
-        let limits = SearchLimits {
-            max_depth: Some(3),
-            time_allocated: None,
-            infinite: false,
-        };
-        let shared_tt = Arc::new(Mutex::new(TranspositionTable::new(1)));
-        let best_move = search_position(
-            board.clone(),
-            limits,
-            stop_signal,
-            Some(shared_tt.clone()),
-            |_| {},
-        );
-        assert!(best_move.is_some());
+        let limits = SearchLimits::depth(3);
+        let mut tt = TranspositionTable::new(1);
+        let best_move = iterative_deepening(board.clone(), limits, None, &mut tt, |_| {}).unwrap();
 
-        let tt = shared_tt.lock().unwrap();
         let pv = tt.extract_pv(&board, 3);
         assert!(!pv.is_empty());
-        assert_eq!(pv[0], best_move.unwrap());
+        assert_eq!(pv[0], best_move);
     }
 
     #[test]
     fn forced_mate_bestmove_matches_pv_and_scores_mate() {
         // Every legal reply (Kg8 or a2a1*) allows Rc1c8#.
         let board = Board::from_fen("7k/8/6K1/8/8/8/p7/2R5 b - - 0 1").unwrap();
-        let stop_signal = Arc::new(AtomicBool::new(false));
-        let limits = SearchLimits {
-            max_depth: Some(4),
-            time_allocated: None,
-            infinite: false,
-        };
+        let limits = SearchLimits::depth(4);
+        let mut tt = TranspositionTable::new(1);
         let mut infos = Vec::new();
-        let best_move = search_position(board, limits, stop_signal, None, |info| infos.push(info));
-        let chosen = best_move.expect("Expected a legal move even when getting mated");
+        let chosen = iterative_deepening(board, limits, None, &mut tt, |info| infos.push(info))
+            .expect("Expected a legal move even when getting mated");
         let last_info = infos.last().expect("Expected search info");
         assert_eq!(last_info.pv.first().copied(), Some(chosen));
         assert!(
@@ -684,9 +723,8 @@ mod tests {
     #[test]
     fn stalemate_scores_zero() {
         let mut board = Board::from_fen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1").unwrap();
-        let stop_signal = Arc::new(AtomicBool::new(false));
         let mut tt = TranspositionTable::new(1);
-        let mut ctx = SearchContext::new(stop_signal, None, &mut tt);
+        let mut ctx = SearchContext::new(None, None, &mut tt);
         let score = alpha_beta_search(&mut board, NEG_INF, POS_INF, 2, 1, &mut ctx);
         assert_eq!(score, 0);
     }
