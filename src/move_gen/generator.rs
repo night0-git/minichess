@@ -379,6 +379,11 @@ fn gen_castling_moves(board: &Board, us: Color, king_sq: Square) -> Vec<Move> {
     moves
 }
 
+/// Returns `true` if `sq` is attacked by any piece of `attacker_col`.
+pub(crate) fn is_square_attacked(board: &Board, sq: Square, attacker_col: Color) -> bool {
+    !get_attackers(board, sq, attacker_col).is_empty()
+}
+
 /// Returns `true` if the side to move has at least one legal en passant capture.
 pub(crate) fn has_legal_ep(board: &Board) -> bool {
     let Some(ep_sq) = board.state.ep_square else {
