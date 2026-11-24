@@ -379,6 +379,30 @@ fn gen_castling_moves(board: &Board, us: Color, king_sq: Square) -> Vec<Move> {
     moves
 }
 
+/// Returns `true` if the side to move has at least one legal en passant capture.
+pub(crate) fn has_legal_ep(board: &Board) -> bool {
+    let Some(ep_sq) = board.state.ep_square else {
+        return false;
+    };
+    let us = board.side_to_move;
+    let them = us.flip();
+    let king_bb = board.bitboard(Piece::new(us, Kind::King));
+    if king_bb.is_empty() {
+        return false;
+    }
+    let king_sq = king_bb.lsb();
+
+    // Friendly pawns able to capture onto `ep_sq` sit on opponent-colored pawn attacks from `ep_sq`.
+    let candidates =
+        attacks::pawn_attacks(ep_sq, them) & board.bitboard(Piece::new(us, Kind::Pawn));
+    for from in candidates {
+        if is_ep_legal(board, from, ep_sq, king_sq, us) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Returns `true` if the side to move's king is currently in check.
 pub fn is_in_check(board: &Board) -> bool {
     let us = board.side_to_move;

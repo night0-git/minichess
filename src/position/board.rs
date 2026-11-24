@@ -41,6 +41,7 @@ pub const CASTLING_MASKS: [u8; 64] = [
 pub struct State {
     pub castling_rights: u8,
     pub ep_square: Option<Square>,
+    pub(crate) ep_hashed: bool,
     pub halfmove_clock: u32,
     pub captured_pcs: Option<Piece>,
     pub zobrist_key: u64,
@@ -165,6 +166,7 @@ impl Board {
             state: State {
                 castling_rights: 0,
                 ep_square: None,
+                ep_hashed: false,
                 halfmove_clock: 0,
                 captured_pcs: None,
                 zobrist_key: 0,
@@ -193,8 +195,10 @@ impl Board {
         // Castling Rights
         key ^= ZOBRIST.castling[self.state.castling_rights as usize];
 
-        // En Passant
-        if let Some(ep) = self.state.ep_square {
+        // En passant: hash only when a legal en passant capture exists.
+        if let Some(ep) = self.state.ep_square
+            && crate::move_gen::generator::has_legal_ep(self)
+        {
             key ^= ZOBRIST.en_passant[ep.file() as usize];
         }
 
@@ -540,13 +544,15 @@ impl Board {
     ) {
         self.state.captured_pcs = captured_pcs;
 
-        // Update zobrist key: XOR out old state
+        // Update zobrist key: XOR out old state.
         self.state.zobrist_key ^= ZOBRIST.castling[self.state.castling_rights as usize];
-        if let Some(ep) = self.state.ep_square {
+        if self.state.ep_hashed
+            && let Some(ep) = self.state.ep_square
+        {
             self.state.zobrist_key ^= ZOBRIST.en_passant[ep.file() as usize];
         }
 
-        // Update en passant target square
+        // Update en passant target square.
         if flag == Flag::DoublePawnPush {
             self.state.ep_square = Some(Square::new(match moving_pcs.color() {
                 Color::White => mv.to().as_u8() - 8,
@@ -555,30 +561,34 @@ impl Board {
         } else {
             self.state.ep_square = None;
         }
+        self.state.ep_hashed = false;
 
-        // Halfmove clock reset on capture or pawn move
+        // Halfmove clock reset on capture or pawn move.
         if captured_pcs.is_some() || moving_pcs.kind() == Kind::Pawn {
             self.state.halfmove_clock = 0;
         } else {
             self.state.halfmove_clock += 1;
         }
 
-        // Castling rights update
+        // Castling rights update.
         self.state.castling_rights &=
             CASTLING_MASKS[mv.from().as_usize()] & CASTLING_MASKS[mv.to().as_usize()];
 
-        // XOR in new state
-        self.state.zobrist_key ^= ZOBRIST.castling[self.state.castling_rights as usize];
-        if let Some(ep) = self.state.ep_square {
-            self.state.zobrist_key ^= ZOBRIST.en_passant[ep.file() as usize];
-        }
-        self.state.zobrist_key ^= ZOBRIST.side_to_move;
-
-        // Turn update
+        // Flip side to move before checking legal en passant for the next player.
         if self.side_to_move == Color::Black {
             self.fullmove_counter += 1;
         }
         self.side_to_move = self.side_to_move.flip();
+
+        // XOR in new state.
+        self.state.zobrist_key ^= ZOBRIST.castling[self.state.castling_rights as usize];
+        if let Some(ep) = self.state.ep_square
+            && crate::move_gen::generator::has_legal_ep(self)
+        {
+            self.state.zobrist_key ^= ZOBRIST.en_passant[ep.file() as usize];
+            self.state.ep_hashed = true;
+        }
+        self.state.zobrist_key ^= ZOBRIST.side_to_move;
     }
 
     /// Returns a pretty-formatted ASCII representation of the board.

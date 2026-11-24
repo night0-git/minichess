@@ -104,7 +104,8 @@ pub fn parse(fen: &str) -> Result<Board, ParseError> {
         .parse::<u32>()
         .map_err(ParseError::InvalidFullmoveCounter)?;
 
-    // Finalize hashes
+    // Finalize hashes.
+    board.state.ep_hashed = crate::move_gen::generator::has_legal_ep(&board);
     board.state.zobrist_key = board.compute_zobrist_key();
     board.state.pawn_key = board.compute_pawn_key();
 
