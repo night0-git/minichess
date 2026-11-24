@@ -286,6 +286,8 @@ impl Board {
                 if to.rank() == promo_rank {
                     let promo = mv.promotion().ok_or(Error::MissingPromotion(mv))?;
                     Flag::promo(promo, is_capture).ok_or(Error::IllegalMove(mv))
+                } else if mv.promotion().is_some() {
+                    Err(Error::IllegalMove(mv))
                 } else if self.state.ep_square == Some(to) && from.file() != to.file() {
                     Ok(Flag::EpCapture)
                 } else if (from.rank() as i8 - to.rank() as i8).abs() == 2 {
@@ -297,9 +299,16 @@ impl Board {
                 }
             }
             Kind::King => {
-                if (from.rank() == 0 || from.rank() == 7) && from.file() == 4 && to.file() == 6 {
+                if mv.promotion().is_some() {
+                    Err(Error::IllegalMove(mv))
+                } else if (from.rank() == 0 || from.rank() == 7)
+                    && to.rank() == from.rank()
+                    && from.file() == 4
+                    && to.file() == 6
+                {
                     Ok(Flag::KingCastle)
                 } else if (from.rank() == 0 || from.rank() == 7)
+                    && to.rank() == from.rank()
                     && from.file() == 4
                     && to.file() == 2
                 {
@@ -311,7 +320,9 @@ impl Board {
                 }
             }
             _ => {
-                if is_capture {
+                if mv.promotion().is_some() {
+                    Err(Error::IllegalMove(mv))
+                } else if is_capture {
                     Ok(Flag::Capture)
                 } else {
                     Ok(Flag::Quiet)
@@ -466,11 +477,14 @@ impl Board {
         self.state = prev_state;
     }
 
-    /// Resolve the move flag from the current board and make the move,
+    /// Validate move legality, resolve its flag from the current board, and make the move,
     /// returning the resolved (flagged) move or an error instead of panicking.
     pub fn try_make_move(&mut self, mv: Move) -> Result<Move, Error> {
         let flag = self.move_flag(mv)?;
         let resolved = mv.with_flag(flag);
+        if !crate::move_gen::gen_all_moves(self).contains(&resolved) {
+            return Err(Error::IllegalMove(mv));
+        }
         self.make_move(resolved);
         Ok(resolved)
     }
