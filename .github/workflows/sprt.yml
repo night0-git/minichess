@@ -38,13 +38,16 @@ jobs:
 
       - name: Run SPRT
         timeout-minutes: 340
+        # Stop fastchess gracefully before the step timeout so logs and PGN flush cleanly.
         run: |
           ./scripts/bench_sprt.sh \
             -y \
+            -q \
             -r "${{ inputs.base_ref }}" \
             -t "${{ inputs.tc }}" \
             -n 100000 \
             -c "$(nproc)" \
+            --duration 330m \
             --fastchess /tmp/fastchess/fastchess
 
       - name: Upload benchmark results

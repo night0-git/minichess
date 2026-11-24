@@ -29,6 +29,8 @@ BOOK=""
 FASTCHESS_BIN="${FASTCHESS:-}"
 OUT_DIR="$ROOT_DIR/benchmarks"
 AUTO_CONFIRM=false
+DURATION=""
+QUIET=false
 
 usage() {
     cat <<EOF
@@ -51,6 +53,8 @@ Options:
       --fixed               Run fixed rounds without SPRT.
   -o, --out-dir <DIR>       Directory to save timestamped .log and .pgn results
                             (default: benchmarks/).
+      --duration <TIME>     Stop fastchess gracefully after TIME (e.g. 330m, 2h).
+  -q, --quiet               Suppress per-game lines on stdout (full output still saved to .log).
   -y, --yes                 Skip confirmation prompt and start immediately.
       --fastchess <PATH>    Path to fastchess binary.
   -h, --help                Show this help message.
@@ -106,6 +110,14 @@ while [[ $# -gt 0 ]]; do
             OUT_DIR="$2"
             shift 2
             ;;
+        --duration)
+            DURATION="$2"
+            shift 2
+            ;;
+        -q|--quiet)
+            QUIET=true
+            shift
+            ;;
         -y|--yes)
             AUTO_CONFIRM=true
             shift
@@ -141,6 +153,11 @@ if [[ -z "$FASTCHESS_BIN" ]]; then
         echo "Please specify with --fastchess <PATH> or set FASTCHESS env variable." >&2
         exit 1
     fi
+fi
+
+if [[ -n "$DURATION" ]] && ! command -v timeout >/dev/null 2>&1; then
+    echo "Error: --duration requires the 'timeout' utility, which was not found in PATH." >&2
+    exit 1
 fi
 
 # Locate opening book
@@ -270,6 +287,9 @@ print_summary() {
         echo "   Evaluation  : Fixed match ($ROUNDS rounds = $((ROUNDS * 2)) games)"
     fi
     echo "   Fastchess   : $FASTCHESS_BIN"
+    if [[ -n "$DURATION" ]]; then
+        echo "   Time Limit  : $DURATION"
+    fi
     echo "   Output      : $OUT_REL/${RUN_ID}.{log,pgn}"
     echo "================================================================================"
     echo ""
@@ -323,9 +343,26 @@ if [[ -z "$BASE_BIN" ]]; then
 fi
 
 # Run fastchess
-EXTRA_ARGS=()
+FASTCHESS_CMD=(
+    "$FASTCHESS_BIN"
+    -engine cmd="$CANDIDATE_BIN" name="Candidate"
+    -engine cmd="$BASE_BIN" name="Baseline"
+    -each tc="$TC"
+    -rounds "$ROUNDS"
+    -repeat
+    -concurrency "$CONCURRENCY"
+    -openings file="$BOOK" format="$BOOK_FORMAT" order=random
+    -draw movenumber=40 movecount=8 score=10
+    -resign movecount=4 score=800
+    -pgnout file="$PGN_OUT"
+    -config outname="$OUT_DIR/${RUN_ID}.json"
+)
 if [[ "$USE_SPRT" == "true" ]]; then
-    EXTRA_ARGS+=("-sprt" "elo0=$ELO0" "elo1=$ELO1" "alpha=0.05" "beta=0.05")
+    FASTCHESS_CMD+=("-sprt" "elo0=$ELO0" "elo1=$ELO1" "alpha=0.05" "beta=0.05")
+fi
+if [[ -n "$DURATION" ]]; then
+    # Run in timeout's own process group so SIGINT/SIGKILL reaches fastchess and engine children.
+    FASTCHESS_CMD=(timeout --signal=INT --kill-after=30s "$DURATION" "${FASTCHESS_CMD[@]}")
 fi
 
 mkdir -p "$OUT_DIR"
@@ -333,15 +370,23 @@ print_summary > "$LOG_OUT"
 
 echo ""
 echo "==> Launching fastchess match..."
-"$FASTCHESS_BIN" \
-  -engine cmd="$CANDIDATE_BIN" name="Candidate" \
-  -engine cmd="$BASE_BIN" name="Baseline" \
-  -each tc="$TC" \
-  -rounds "$ROUNDS" \
-  -repeat \
-  -concurrency "$CONCURRENCY" \
-  -openings file="$BOOK" format="$BOOK_FORMAT" order=random \
-  -draw movenumber=40 movecount=8 score=10 \
-  -resign movecount=4 score=800 \
-  -pgnout file="$PGN_OUT" \
-  "${EXTRA_ARGS[@]}" | tee -a "$LOG_OUT"
+# Ignore SIGINT in tee so fastchess can flush its final summary before EOF.
+set +e
+if [[ "$QUIET" == "true" ]]; then
+    "${FASTCHESS_CMD[@]}" 2>&1 \
+        | tee -i -a "$LOG_OUT" \
+        | awk '!/^(Started game |Finished game |Warning; PV continues )/ { print; fflush() }'
+    FASTCHESS_STATUS="${PIPESTATUS[0]}"
+else
+    "${FASTCHESS_CMD[@]}" 2>&1 | tee -i -a "$LOG_OUT"
+    FASTCHESS_STATUS="${PIPESTATUS[0]}"
+fi
+set -e
+
+if [[ -n "$DURATION" && ( "$FASTCHESS_STATUS" -eq 124 || "$FASTCHESS_STATUS" -eq 137 ) ]]; then
+    echo "" | tee -a "$LOG_OUT"
+    echo "==> Reached time limit ($DURATION); stopped match and saved partial results." | tee -a "$LOG_OUT"
+    exit 0
+fi
+
+exit "$FASTCHESS_STATUS"
