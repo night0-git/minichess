@@ -454,29 +454,42 @@ fn get_pinned_pieces(board: &Board, king_sq: Square, us: Color) -> Bitboard {
 fn is_ep_legal(board: &Board, from: Square, ep_sq: Square, king_sq: Square, us: Color) -> bool {
     let them = us.flip();
 
-    // The square of the pawn being captured
+    // The square of the pawn being captured.
     let captured_pawn_sq = Square::new(match us {
         Color::White => ep_sq.as_usize() - 8,
         Color::Black => ep_sq.as_usize() + 8,
     } as u8);
 
-    // Create a modified occupancy bitboard reflecting the state after the EP capture
+    // Reject if a knight or another enemy pawn still checks the king after removing the captured pawn.
+    if !(attacks::knight_attacks(king_sq) & board.bitboard(Piece::new(them, Kind::Knight)))
+        .is_empty()
+    {
+        return false;
+    }
+
+    let remaining_enemy_pawns =
+        board.bitboard(Piece::new(them, Kind::Pawn)) & !Bitboard::new(captured_pawn_sq.mask());
+    if !(attacks::pawn_attacks(king_sq, us) & remaining_enemy_pawns).is_empty() {
+        return false;
+    }
+
+    // Create a modified occupancy bitboard reflecting the state after the EP capture.
     let mut modified_occupancy = board.occupancy();
     modified_occupancy.clear_bit(from);
     modified_occupancy.clear_bit(captured_pawn_sq);
     modified_occupancy |= Bitboard::new(ep_sq.mask());
 
-    // Check if the king is attacked horizontally by a rook or queen
+    // Check if the king is attacked orthogonally by a rook or queen.
     let rooks_queens = board.bitboard(Piece::new(them, Kind::Rook))
         | board.bitboard(Piece::new(them, Kind::Queen));
 
-    let horizontal_attacks = attacks::rook_attacks(king_sq, modified_occupancy) & rooks_queens;
+    let orthogonal_attacks = attacks::rook_attacks(king_sq, modified_occupancy) & rooks_queens;
 
-    if !horizontal_attacks.is_empty() {
+    if !orthogonal_attacks.is_empty() {
         return false;
     }
 
-    // Check diagonal attacks (in case the EP capture opened a diagonal)
+    // Check diagonal attacks (in case the EP capture opened a diagonal).
     let bishops_queens = board.bitboard(Piece::new(them, Kind::Bishop))
         | board.bitboard(Piece::new(them, Kind::Queen));
 
