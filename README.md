@@ -27,3 +27,6 @@ board.try_make_move(Move::from_str("e2e4")?)?;
 let best = search(&board, SearchLimits::depth(4))?;
 println!("Best move: {best}");
 ```
+
+## Benchmark
+A new version can be verified using the [sprt](./.github/workflows/sprt.yml) workflow, which runs the [`sprt.sh`](./scripts/bench_sprt.sh) script, with number of games set to 100000 by default. It compares the latest version to a previous baseline commit using [`fastchess`](https://github.com/Disservin/fastchess), if the exported result shows an LLR (Log-Likelihood Ratio) past 2.94 then the newest model is better than the baseline.
